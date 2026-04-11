@@ -4,6 +4,191 @@
 
 ---
 
+## S30b — 모바일 서술형 입력 UI (2026-04-11)
+
+### 완료된 것
+- **DescriptiveInputScreen** — `packages/mobile/src/screens/DescriptiveInputScreen.tsx`. PurposeSelect → DescriptiveInput → (S31) Preview 흐름의 두 번째 화면. 4가지 목적별로 다른 prompt/placeholder/예시 카피를 표시하고 부모 텍스트(최대 500자)를 받아 `POST /api/v1/stories/plan`(S30a)에 전달한다.
+  - **목적별 가이드 카피** — `PURPOSE_GUIDES: Record<PurposeId, PurposeGuide>` 를 화면 파일 내부에 co-locate. `Record<PurposeId, ...>` 가 컴파일 타임에 4종 모두 존재함을 강제(누락 시 TS 에러). 별도 데이터 파일을 만들지 않아 5파일 한도 안에 수렴.
+  - **글자수 카운터** — `text.length / 500` 표기, 0/active/over 3 상태 색분기. `maxLength={550}` 으로 살짝 여유를 두고 over 시 빨간 경고 + 제출 disable. 백엔드 422 분기와 이중 안전망.
+  - **child_id 처리** — 마운트 시 `listProfiles()` → 첫 프로필 자동 선택 + 화면 상단 chip에 `{name}에게 들려줄 이야기` 형태로 노출. 프로필 0개면 "프로필 만들기" CTA(empty 상태). 401이면 "다시 로그인해주세요" 메시지(error 상태). S30a 다음 세션 메모의 결정 포인트(child picker vs auto-pick)를 **MVP=auto-pick** 으로 결정. S31에서 picker 도입 예정.
+  - **에러 매핑** (요구사항 #5):
+    - 400 + `code === "REJECTED_INTENT"` → "이 이야기는 함께 만들기 어려워요" + 서버 메시지
+    - 401 → "다시 로그인해주세요" (Login 화면 미구현이라 Alert 으로 임시 처리, TODO 주석)
+    - 404 → "선택한 아이를 찾을 수 없어요"
+    - 422 → "1~500자 사이로 적어주세요"
+    - 그 외 → "잠깐, 다시 한번 해볼게요 😊"
+  - **로딩 카피** — 제출 중에는 ActivityIndicator + "이야기가 자라고 있어요 🌱" (CLAUDE.md 톤 가이드 그대로 적용).
+  - **S31 임시 처리** — Preview 화면이 아직 없으므로 응답을 받으면 Alert 으로 title + summary + scene_highlights 를 보여주고 `navigation.popToTop()` 으로 Home 복귀. `// TODO(S31)` 주석으로 교체 지점 명시.
+- **stories API 클라이언트** — `packages/mobile/src/api/stories.ts` 신규.
+  - `createStoryPlan({ parent_text, purpose_category, child_id })` 함수 + 응답 타입 `PlanStoryResponse { plan, preview }`.
+  - 와이어 타입(`PlannedScene`, `StyleNotes`, `ScenePlan`, `StoryPreview`)을 백엔드 Pydantic 직렬화(snake_case)와 1:1 매칭. `profiles.ts` 와 동일한 규약. (contracts/story-engine.ts 는 camelCase 이지만 와이어는 snake_case 가 사실상 표준이므로 와이어 충실성 우선.)
+  - `purpose_category: PurposeId` 로 타입을 잡아 mobile `PurposeId` ↔ 백엔드 `IntentCategory` 컴파일 타임 일치 강제.
+  - 상수 `PARENT_TEXT_MAX_LENGTH = 500`, `REJECTED_INTENT_CODE = "REJECTED_INTENT"` export. 전자는 백엔드 동일 상수와 반드시 동기화 필요(주석 명시).
+- **apiFetch 에러 파싱 개선** — `packages/mobile/src/api/client.ts`. 기존 코드는 `{detail: "..."}` 만 가정해 백엔드 글로벌 핸들러(`storytale/app.py`)가 래핑하는 `{error: {code, message}}` 형식을 무시했고 모든 에러가 default 메시지로 떨어지는 잠복 버그가 있었다. S30b의 `REJECTED_INTENT` 분기를 위해 필수 수정.
+  - `parseErrorBody(body)` 헬퍼 추가: 1) 래핑 형식의 message가 string인 케이스, 2) message가 dict인 케이스(REJECTED_INTENT처럼 detail에 dict를 넣은 케이스에서 inner code/message 추출), 3) 레거시 `{detail: "..."}` 호환.
+  - `ApiClientError(status, detail, code?)` 의 3번째 파라미터(code)는 이미 존재했으나 실제로 채워지지 않고 있었음. 이번에 채움. 기존 호출자(profiles UI)는 code를 사용하지 않으므로 영향 없음.
+- **AppNavigator 등록** — `Stack.Screen name="DescriptiveInput" component={DescriptiveInputScreen}` 추가. 라우트 파라미터 시그니처(`{ purpose: PurposeId }`)는 S29에서 이미 고정해 둔 그대로 사용.
+- **TDD (RED → GREEN, 컴파일 타임)** — jest-expo 미복구 상태이므로 S29와 동일한 패턴:
+  1. RED: AppNavigator에서 `import { DescriptiveInputScreen } from "../screens/DescriptiveInputScreen"` 만 먼저 추가 → `npx tsc --noEmit` → `TS2307: Cannot find module '../screens/DescriptiveInputScreen'` 1건 실패 확인.
+  2. GREEN: 화면/API/에러파서 구현 → `npx tsc --noEmit` → exit 0 (2회 검증, rename 후 1회 추가).
+  3. 추가로 `Record<PurposeId, PurposeGuide>` 와 `purpose_category: PurposeId` 가 mobile/백엔드 식별자 일치를 컴파일 타임에 강제.
+- **백엔드 회귀 확인** — S30a 13/13 통과 (`pytest tests/test_s30a_plan_endpoint.py`).
+
+### 구현 요약
+- **주요 클래스/파일**:
+  - `packages/mobile/src/screens/DescriptiveInputScreen.tsx::DescriptiveInputScreen` — 메인 화면 컴포넌트
+  - `packages/mobile/src/screens/DescriptiveInputScreen.tsx::PURPOSE_GUIDES` — 4종 목적별 카피 (Record<PurposeId, PurposeGuide>)
+  - `packages/mobile/src/screens/DescriptiveInputScreen.tsx::handleApiError` — 상태코드/REJECTED_INTENT 분기 매핑
+  - `packages/mobile/src/screens/DescriptiveInputScreen.tsx::ProfileState` — `loading | ready | empty | error` 4상태 union
+  - `packages/mobile/src/api/stories.ts::createStoryPlan` — `POST /stories/plan` 호출
+  - `packages/mobile/src/api/stories.ts::PARENT_TEXT_MAX_LENGTH`, `REJECTED_INTENT_CODE` — 백엔드 상수와 동기화 필요한 값
+  - `packages/mobile/src/api/stories.ts::PlannedScene/StyleNotes/ScenePlan/StoryPreview/PlanStoryResponse` — 와이어 타입 (snake_case)
+  - `packages/mobile/src/api/client.ts::parseErrorBody` — 백엔드 래핑 에러 형식 + 레거시 형식 호환 파서
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — `DescriptiveInput` 스크린 등록
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts` 의 `ScenePlan/StoryPreview` 는 camelCase(`sceneId`, `pageCount`)지만 백엔드 Pydantic이 snake_case로 직렬화하므로 mobile 와이어 타입은 snake_case로 정의. `profiles.ts` 와 동일한 규약. 와이어 충실성을 우선하고 contracts 는 도메인 인터페이스 문서로만 사용. (S5/S28 결정과 일관.)
+  - contracts 에는 `IntentCategory` 가 백엔드 전용 export 라 mobile 은 `PurposeId` 라는 별도 유니온을 재선언(S29)했고, S30b는 그 `PurposeId` 를 `purpose_category` 의 타입으로 사용해 1:1 매핑을 컴파일 타임에 강제.
+- **환경변수**: 추가 없음. (`EXPO_PUBLIC_API_URL` 은 S28에서 이미 도입.)
+- **의존 모듈 사용**:
+  - `apiFetch`, `ApiClientError` (S28 client.ts) — 인증/베이스URL 자동 처리
+  - `listProfiles`, `ChildProfile` (S28 profiles.ts) — 첫 프로필 자동 선택
+  - `PurposeId` (S29 purposes.ts) — 4종 목적 식별자, 백엔드 IntentCategory와 1:1 매핑
+  - `RootStackParamList` (S28/S29에서 누적 확장) — 라우트 타입
+  - `theme` (S28에서 디자인 가이드 색 적용 완료) — 디자인 토큰
+  - 백엔드 `POST /api/v1/stories/plan` (S30a) — 본 화면이 호출하는 유일한 엔드포인트
+
+### 다음 세션에 알려줄 것
+- **S31 진입 시 할 일**:
+  1. **백엔드 분할(S31a) 선결**: `POST /stories/plan/revise` 엔드포인트 신설. `InterpreterOrchestrator.revise_plan()` 은 구현되어 있으나 라우터로 미연결. S30a와 동일한 패턴(엔드포인트 TDD → 모바일 UI). **revise 횟수(MAX_REVISIONS=3) 추적이 인스턴스 상태로 되어 있는데 매 요청마다 새 InterpreterOrchestrator 인스턴스가 생성되므로 무력화됨 — S31a에서 서버 잡 상태 또는 클라이언트 카운터 중 하나로 결정 필요.** (S30a 메모에서 이미 지적된 사항 그대로 이월.)
+  2. **PreviewScreen 신설**: 라우트 파라미터 모양 `{ plan: ScenePlan; preview: StoryPreview }`. S30b 화면의 `Alert.alert(...)` 임시 처리(`// TODO(S31)` 주석 위치)를 `navigation.navigate("Preview", { plan, preview })` 로 교체. ScenePlan/StoryPreview 타입은 `packages/mobile/src/api/stories.ts` 에서 export 됨 → 동일한 와이어 타입 재사용.
+  3. **child picker 도입 검토**: S30b는 `listProfiles()` 의 첫 프로필을 자동 선택하므로 다중 자녀 가구는 기본값이 첫 아이로 고정됨. PreviewScreen 또는 PurposeSelect 위에 child picker 컴포넌트를 추가하거나, ProfileState 의 `ready` 분기에 "다른 아이로 바꾸기" 칩을 붙이는 등 개선 필요.
+- **client.ts 에러 파싱 개선의 파급효과**: 기존 화면(ProfileFormScreen 등)도 이제 `error.message` 를 정확히 추출해서 보여준다(이전엔 항상 default 메시지). 이전엔 모든 에러가 "알 수 없는 오류가 발생했어요" 로 떨어지던 잠복 동작이 사라지므로, S31 이후 화면 검증 시 "갑자기 에러 메시지가 다르게 보이네?" 라고 느낄 수 있음. 이는 버그 수정이지 회귀가 아님.
+- **api-conventions.md 와의 차이**: 백엔드 글로벌 핸들러는 `{"error": {"code", "message"}}` 로 래핑하는데 `api-conventions.md` 는 `{"detail": "...", "code": "..."}` 형식을 명시. S30a 메모에서 이미 지적됨. **별도 정리 태스크**(api-conventions.md 또는 글로벌 핸들러 둘 중 하나를 정렬)를 권장. 현재 mobile 파서는 두 형식 모두 호환.
+- **mobile jest 미복구 상태 지속**: jest-expo@^52 ↔ expo@~54 mismatch (S29 메모 참조). S30b도 컴파일 타임 어서션 + tsc 만으로 검증. 런타임 RTL 테스트가 필요해지면 별도 인프라 태스크.
+- **DEFAULT_PREVIEW_STYLE 결정 이월**: S30a가 `style="watercolor"` 하드코딩, S30b는 그 응답을 그대로 받는다. S31에서 부모가 스타일을 바꾸면 preview를 재요청해야 하는데 그 엔드포인트가 없음. S31a에서 함께 검토 필요(S30a 메모에서 이월).
+
+### 변경된 파일 목록
+- `packages/mobile/src/api/client.ts` (수정 — `parseErrorBody` 헬퍼 + 호출부, 와이어 형식/레거시 형식 호환)
+- `packages/mobile/src/api/stories.ts` (신규 — `createStoryPlan` + 와이어 타입 + 상수)
+- `packages/mobile/src/screens/DescriptiveInputScreen.tsx` (신규 — 메인 화면)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (수정 — `DescriptiveInput` 스크린 등록 + import)
+- `docs/SESSION_LOG.md` (수정 — 본 항목 추가)
+- `docs/TASK_BACKLOG.md` (수정 — S30b [완료])
+- `docs/PROGRESS.md` (수정 — Phase 6 진행률 + 현재 위치 + 차단 갱신)
+
+---
+
+## S30a — 백엔드 plan 엔드포인트 (2026-04-11)
+
+### 완료된 것
+- **S30 분할 결정** — 원래 S30("서술형 입력 UI")은 산출물에 "API 호출"을 포함했으나, 호출 대상인 `POST /stories/plan`이 백엔드에 없었음. S19가 노출한 `/stories/generate`는 Phase D(이미 확정된 plan)만 처리. parent_text → ScenePlan 단계를 만드는 엔드포인트가 누락되어 있어 모바일 작업을 시작할 수 없었음. CLAUDE.md 규칙(모듈 격리 + 5파일 한도)에 따라 S30을 **S30a (백엔드)** + **S30b (모바일)** 로 분할.
+- **POST /api/v1/stories/plan 엔드포인트** — `packages/backend/src/storytale/api/stories/router.py`에 추가:
+  - 요청: `PlanStoryRequest { parent_text: 1~500자, purpose_category: IntentCategory, child_id: str }`. `IntentCategory`는 `Literal["value_teaching", "interest_story", "problem_solving", "celebration"]`로 contracts/story-engine.ts와 1:1 매핑.
+  - 응답: `PlanStoryResponse { plan: ScenePlan, preview: StoryPreview }`. S31(미리보기 화면)이 둘 다 필요하므로 한 번에 반환.
+  - 인증: JWT 필수 (`CurrentUserDep`).
+  - 소유자 검증: `_load_owned_child_profile()` 헬퍼가 child_id를 UUID 변환 + DB 조회 + 소유자 일치 확인. 존재하지 않음/타인 소유/UUID 형식 오류 모두 404로 통일(정보 노출 방지, S20 패턴과 일치).
+  - DB ChildProfile → interpreter 도메인 ChildProfile 매핑: `_to_interpreter_child()` 헬퍼.
+  - 호출 흐름: `orchestrator.interpret_and_plan(parent_text, purpose, child)` → `orchestrator.get_preview(plan, style="watercolor", child_name)`.
+  - style은 `DEFAULT_PREVIEW_STYLE = "watercolor"` 상수로 고정. S31에서 부모가 명시적으로 고를 때까지 미리보기에는 기본값 사용.
+  - 에러 매핑: `RejectedIntentError` → 400 + `detail={"message", "code": "REJECTED_INTENT"}`. 그 외 예외 → 500 + 부드러운 한국어 메시지. `HTTPException`은 그대로 통과(404/422 재발생 방지).
+- **TDD (RED → GREEN)** — 13개 테스트:
+  1. RED 확인: 엔드포인트 작성 전 첫 테스트가 405 Method Not Allowed (POST /stories/plan 미존재 → GET /stories/{story_id}와 충돌). `pytest -x`로 명확히 RED 신호 확인.
+  2. GREEN: 13/13 통과 (happy path 2 + 인증 1 + 소유자 3 + 입력 검증 5 + 에러 처리 2).
+- **회귀 확인**: S19/S20/S28/S30a 통합 62/62 통과. ruff check + ruff format 통과.
+
+### 구현 요약
+- **주요 클래스/함수**:
+  - `packages/backend/src/storytale/api/stories/router.py::PlanStoryRequest` — Pydantic, parent_text 1~500자, purpose_category Literal 4종, child_id str
+  - `packages/backend/src/storytale/api/stories/router.py::PlanStoryResponse` — `{plan: ScenePlan, preview: StoryPreview}`
+  - `packages/backend/src/storytale/api/stories/router.py::plan_story()` — POST /stories/plan 핸들러
+  - `packages/backend/src/storytale/api/stories/router.py::_load_owned_child_profile()` — UUID 변환 + 소유자 검증 헬퍼 (404 통일)
+  - `packages/backend/src/storytale/api/stories/router.py::_to_interpreter_child()` — DB → 도메인 매핑
+  - `packages/backend/src/storytale/api/stories/router.py::IntentCategory` — `Literal["value_teaching", "interest_story", "problem_solving", "celebration"]`
+  - 상수: `PARENT_TEXT_MAX_LENGTH = 500` (security.md 부모 입력 제한), `DEFAULT_PREVIEW_STYLE = "watercolor"`
+- **라우트 등록 순서**: `/plan` → `/generate` → `/jobs/...` → `""` (목록) → `/{story_id}` 순. POST `/plan`과 GET `/{story_id}`는 메서드가 다르므로 충돌은 없으나, 가독성을 위해 `/plan`을 `/generate` 바로 위에 배치.
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts`에는 HTTP 엔드포인트 정의가 없고 `StoryOrchestrator.interpretAndPlan()` 메서드만 존재. 본 엔드포인트는 그 메서드 + `getPreview()` 두 단계를 합쳐 한 번에 노출함 (응답 객체에 `plan`과 `preview` 동시 포함). S31이 미리보기 화면에서 둘 다 필요하므로 라운드트립 1회로 줄임.
+  - 글로벌 핸들러(`storytale/app.py::custom_http_exception_handler`)가 모든 HTTPException을 `{"error": {"code": status, "message": detail}}`로 래핑하므로, `api-conventions.md`의 `{"detail": "...", "code": "..."}` 형식과는 구조가 다름. detail에 dict를 넣으면 그 dict가 `error.message` 자리에 들어감. 클라이언트는 `body.error.message.code === "REJECTED_INTENT"`로 구분. S30a는 기존 컨벤션을 따라 일관성 유지.
+  - DEFAULT_PREVIEW_STYLE 하드코딩: contracts에는 style 필수지만, S31에서 부모가 선택하므로 S30a는 기본값 사용. S31a에서 revise/style 변경 시 재호출 가능.
+- **환경변수**: 추가 없음.
+- **의존 모듈 사용**:
+  - `StoryOrchestrator.interpret_and_plan()`, `StoryOrchestrator.get_preview()` (S18) — 메서드 위임
+  - `ChildProfile` (S3 DB 모델, alias `ChildProfileModel`) — 소유자 검증 + 도메인 매핑
+  - `ChildProfile` (interpreter/story_personalizer 도메인 모델) — orchestrator에 전달
+  - `RejectedIntentError` (S12 intent_analyzer) — 400 매핑
+  - `StoryPreview` (S15 preview_generator) — 응답 모델
+  - `ScenePlan` (S13 scene_planner) — 응답 모델
+  - `CurrentUserDep` (S27 auth_router) — JWT 인증
+  - `get_db` (S3 dependencies) — DB 세션
+
+### 다음 세션에 알려줄 것
+- **S30b (모바일 서술형 입력 UI) 진입 시 할 일**:
+  1. `DescriptiveInputScreen` 생성 → `AppNavigator`의 `Stack.Screen name="DescriptiveInput"` 등록.
+  2. `route.params.purpose: PurposeId` 수신 → `purposes.ts`에서 목적별 가이드/예시 데이터 추가 (또는 별도 데이터 파일).
+  3. 텍스트 입력 (최대 500자, 카운터 표시 권장).
+  4. `packages/mobile/src/api/stories.ts` 신규 생성 → `createStoryPlan({ parent_text, purpose_category, child_id })` 함수. `apiFetch<PlanResponse>("/stories/plan", { method: "POST", body })`. 응답 타입: `{ plan: ScenePlan, preview: StoryPreview }` — shared 타입 또는 mobile 전용 인터페이스로 정의.
+  5. 에러 처리: 400 + `error.message.code === "REJECTED_INTENT"` 시 부드러운 한국어로 안내. 401은 로그인 화면으로. 404는 "선택한 아이를 찾을 수 없어요". 500은 "잠깐, 다시 한번 해볼게요 😊" 톤.
+  6. child_id를 어떻게 받을지 결정 필요 — 현재 mobile에는 "선택된 child" 상태 관리가 없음. PurposeSelectScreen 진입 전에 프로필 선택 화면을 추가하거나, 단일 프로필 가정 + 첫 번째 프로필 자동 사용.
+- **S31 진입 전에 또 분할이 필요할 수 있음**: `POST /stories/plan/revise` 엔드포인트가 백엔드에 없음. `InterpreterOrchestrator.revise_plan()`은 구현되어 있지만 라우터로 미연결. S31a로 분할해서 동일한 패턴(백엔드 endpoint TDD → 모바일 UI)으로 진행 권장. revise 횟수 제한(MAX_REVISIONS=3)은 InterpreterOrchestrator 인스턴스 상태(`_revision_count`)로 관리되는데, 매 요청마다 새 인스턴스(`get_story_orchestrator`)가 생성되므로 횟수 추적이 안 될 수 있음. **이 부분은 S31a에서 별도 검토 필요** (서버 측 세션/잡 상태 또는 클라이언트 측 카운터).
+- **글로벌 에러 응답 컨벤션**: `storytale/app.py`의 `custom_http_exception_handler`가 `{"error": {"code", "message"}}` 형태로 래핑. 이는 `api-conventions.md`에 적힌 `{"detail", "code"}` 와 다르므로 컨벤션 문서 업데이트가 필요할 수 있음 (별도 정리 태스크 권장).
+- **DEFAULT_PREVIEW_STYLE 결정**: S30a는 미리보기에 "watercolor"를 하드코딩. S31에서 부모가 스타일을 바꾸면 preview를 다시 받아야 하므로, S31a에 "스타일 변경 시 preview만 재요청" 엔드포인트도 검토 필요. 또는 S30a 응답에 3종 스타일 미리보기를 모두 포함시키는 옵션도 있음(LLM 비용 3배 증가하므로 권장 안 함).
+
+### 변경된 파일 목록
+- `packages/backend/src/storytale/api/stories/router.py` (수정 — imports, IntentCategory Literal, PARENT_TEXT_MAX_LENGTH 상수, DEFAULT_PREVIEW_STYLE 상수, PlanStoryRequest, PlanStoryResponse, _load_owned_child_profile, _to_interpreter_child, plan_story 핸들러)
+- `packages/backend/tests/test_s30a_plan_endpoint.py` (신규 — 13 테스트)
+- `docs/TASK_BACKLOG.md` (수정 — S30 → S30a [완료] + S30b [대기], S31 의존성 갱신)
+- `docs/SESSION_LOG.md` (수정 — 본 항목 추가)
+- `docs/PROGRESS.md` (수정 — Phase 6 진행률 + 현재 위치 + 차단 갱신)
+
+---
+
+## S29 — 목적 선택 화면 (2026-04-11)
+
+### 완료된 것
+- **목적 데이터 모듈** — `src/data/purposes.ts`. 백엔드 `IntentCategory`(`docs/contracts/story-engine.ts`) 4종(`value_teaching`, `interest_story`, `problem_solving`, `celebration`)과 1:1 매핑. 각 카드: `id`, `title`(부모 친화 카피), `description`, `emoji`(1개).
+- **PurposeSelectScreen** — 카드 4개 + 하단 "다음" CTA. 디자인 가이드(Section 12) 준수: warm pastel, 카드 borderRadius 20, 버튼 borderRadius 14, Pretendard 폰트, shadowColor `#3E3225`, 최소 터치 타겟 88px(card)/52px(button), `accessibilityRole`/`accessibilityLabel`/`accessibilityState` 부여.
+- **선택 상태** — 카드 탭 시 선택 표시(테두리/배경 primaryLight 전환). "다음" 버튼은 선택 전 disabled, opacity 0.5.
+- **네비게이션** — `RootStackParamList`에 `PurposeSelect: undefined` + `DescriptiveInput: { purpose: PurposeId }` 라우트 시그니처 추가. `PurposeSelect`는 컴포넌트와 함께 등록. `DescriptiveInput`은 S30에서 컴포넌트만 추가하면 흐름 연결.
+- **HomeScreen 진입점** — "이야기 만들기" 보조 버튼(아웃라인 스타일) 추가 → `navigation.navigate("PurposeSelect")`. 기존 "프로필 만들기" 버튼은 그대로.
+- **TDD (컴파일 타임 어서션)** — `purposes.ts`에 두 개의 type-level 어서션:
+  1. `_AssertFour` — `PURPOSE_CARDS.length`가 정확히 4
+  2. `_purposeIdsAreExhaustive` — 카드 `id` 유니온이 `PurposeId`와 정확히 일치(오타/누락 차단)
+  - Red/Green 검증: 먼저 `AppNavigator`에서 `PurposeSelectScreen`/`purposes` import만 추가 → `npx tsc --noEmit` → `TS2307: Cannot find module` 2건 실패 확인 → 데이터/스크린 구현 → tsc 통과.
+- `npx tsc --noEmit` 통과.
+
+### 구현 요약
+- **주요 클래스/함수**:
+  - `packages/mobile/src/data/purposes.ts` — `PurposeId` 유니온, `PurposeCard` 인터페이스, `PURPOSE_CARDS` 4개 (readonly tuple, `as const satisfies readonly PurposeCard[]` 패턴으로 길이 정보 보존)
+  - `packages/mobile/src/screens/PurposeSelectScreen.tsx::PurposeSelectScreen` — 4 카드 렌더 + `selectedId` state + `handleContinue` → `navigation.navigate("DescriptiveInput", { purpose })`
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — `PurposeSelect`/`DescriptiveInput` 라우트 시그니처 추가, `PurposeSelect` 스크린 등록
+  - `packages/mobile/src/screens/HomeScreen.tsx` — `startButton` 보조 버튼 + 스타일 추가
+- **계약 대비 변경점**:
+  - `IntentCategory`(`docs/contracts/story-engine.ts`)는 backend 전용으로 packages/shared에서 export 되어 있지만 mobile은 `@storytale/shared`에 의존하지 않으므로 동일 4개 식별자를 mobile 내부 `PurposeId` 유니온으로 재선언. **변경 금지 주석**으로 1:1 매핑 유지를 강제.
+  - `DescriptiveInput` 라우트는 S29에서 시그니처만 등록 (컴포넌트는 S30). `purpose: PurposeId` 파라미터 모양은 S30 진입 시 그대로 사용 가능.
+- **환경변수**: 추가 없음.
+- **의존성**: 추가 없음 (RN/Expo 기본 + 기존 react-navigation).
+- **의존 모듈 사용**:
+  - `RootStackParamList`(S5, S28에서 확장) — 라우트 타입 안전성
+  - `theme`(S28에서 디자인 가이드 색 적용 완료) — 색/스페이싱 토큰
+  - 백엔드 `docs/contracts/story-engine.ts::IntentCategory` — 4종 식별자 1:1 매핑
+
+### 다음 세션에 알려줄 것
+- **S30 진입 시 할 일**:
+  1. `DescriptiveInputScreen`을 만들고 `AppNavigator`의 `Stack.Screen name="DescriptiveInput"`로 등록.
+  2. `route.params.purpose: PurposeId`로 PurposeSelect의 선택값 수신.
+  3. 목적별로 다른 가이드/예시 카피는 `purposes.ts`에 필드를 추가하거나 별도 데이터 파일로 분리.
+- **mobile jest는 여전히 깨져 있음**: `jest-expo@^52.0.4` ↔ `expo@~54.0.33` 버전 mismatch. `jest-expo/src/preset/setup.js:122`에서 `Object.defineProperty called on non-object` 발생. S29도 S5/S28과 동일하게 `npx tsc --noEmit` + 컴파일 타임 type assertion으로 검증. 런타임 RTL 테스트가 필요하면 `jest-expo` 버전 업데이트가 선행되어야 함 (별도 인프라 태스크 권장).
+- **워크플로우 10단계(모듈 디렉토리 README) 처리**: `src/data/`는 단일 파일(`purposes.ts`) 디렉토리이고 5파일 한도(rule #3)와 충돌하므로 README를 별도 생성하지 않고 `purposes.ts` 헤더 주석으로 대체. 차후 `src/data/`에 파일이 늘어나면 README 생성 권장.
+- **HomeScreen 디자인**: 두 버튼(프로필 만들기 / 이야기 만들기)이 단순 세로 정렬. Phase 6 후반부에 재방문 사용자용 홈 레이아웃 재설계가 필요할 수 있음(서재/최근 스토리 등).
+
+### 변경된 파일 목록
+- `packages/mobile/src/data/purposes.ts` (신규)
+- `packages/mobile/src/screens/PurposeSelectScreen.tsx` (신규)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (수정 — 라우트 2개 추가, PurposeSelect 등록)
+- `packages/mobile/src/screens/HomeScreen.tsx` (수정 — startButton 추가)
+
+---
+
 ## S28 — 아이 프로필 등록 UI (2026-04-10)
 
 ### 완료된 것

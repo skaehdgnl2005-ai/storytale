@@ -272,17 +272,27 @@
 - **의존성**: S27
 - **검증**: 백엔드 28 테스트 통과, `npx tsc --noEmit` 통과
 
-### S29 — 목적 선택 화면 [대기]
-- **산출물**: 4가지 목적 카드 UI
+### S29 — 목적 선택 화면 [완료]
+- **산출물**: 4가지 목적 카드 UI (`PurposeSelectScreen` + `data/purposes.ts`)
 - **의존성**: S5
+- **검증**: `npx tsc --noEmit` 통과 + 컴파일 타임 type assertion(PURPOSE_CARDS 길이=4, IntentCategory 1:1 매핑)
 
-### S30 — 서술형 입력 UI [대기]
-- **산출물**: 목적별 다른 질문/가이드/예시, 텍스트 입력, API 호출
-- **의존성**: S29
+### S30a — 백엔드 plan 엔드포인트 [완료]
+- **산출물**: `POST /api/v1/stories/plan` — parent_text + purpose_category + child_id → ScenePlan + StoryPreview
+- **의존성**: S18 (StoryOrchestrator), S27 (인증), S28 (ChildProfile API)
+- **검증**: pytest 13개 통과 (happy path, 인증, 소유자, 입력 검증, RejectedIntent, 일반 예외)
+- **배경**: S19가 노출한 `/stories/generate`는 이미 확정된 ScenePlan을 받는 Phase D 전용. 그 앞 단계(parent_text → ScenePlan)를 만드는 라우터가 누락되어 있어 S30(서술형 입력 UI)이 호출할 곳이 없었음. S30a가 그 빈자리를 채운다.
+
+### S30b — 서술형 입력 UI [완료]
+- **산출물**: `DescriptiveInputScreen` (목적별 prompt/예시), 글자수 카운터, `POST /stories/plan` 연동, REJECTED_INTENT/401/404/422 에러 매핑, 첫 프로필 자동 선택
+- **추가 산출물**: `packages/mobile/src/api/stories.ts` (`createStoryPlan` + 와이어 타입), `apiFetch` 에러 파서 개선(`{error:{code,message}}` 래핑 형식 + REJECTED_INTENT inner code 추출)
+- **의존성**: S29, S30a
+- **검증**: `npx tsc --noEmit` 통과 + S30a 백엔드 회귀 13/13 통과 + 컴파일 타임 어서션(`Record<PurposeId, PurposeGuide>` 4종 강제, `purpose_category: PurposeId` 1:1 매핑)
 
 ### S31 — 미리보기 & 수정 UI [대기]
 - **산출물**: 요약 카드, 수정 입력, 최대 3회 루프, 확정 버튼
-- **의존성**: S30
+- **의존성**: S30b
+- **선결 조건 (S31a 후보)**: `POST /stories/plan/revise` (또는 동등) 백엔드 엔드포인트 — 현재 라우터에 노출되어 있지 않음. InterpreterOrchestrator.revise_plan()은 구현되어 있으나 HTTP 라우터로 미연결. S30a와 같은 분할 패턴으로 처리 권장.
 
 ### S32 — 생성 중 로딩 UX [대기]
 - **산출물**: SSE 수신, 장면별 프리뷰 카드 등장 애니메이션

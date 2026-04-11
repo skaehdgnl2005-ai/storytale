@@ -1,5 +1,6 @@
-"""스토리 생성/저장/조회 API 라우터 (S19 + S20).
+"""스토리 생성/저장/조회 API 라우터 (S19 + S20 + S30a).
 
+POST /stories/plan → 부모 텍스트 + 목적 + child → ScenePlan + StoryPreview (S30a).
 POST /stories/generate → 202 + jobId (BackgroundTasks로 비동기 생성).
 GET  /stories/jobs/{job_id} → 진행률 + 완료된 장면 목록.
 GET  /stories/jobs/{job_id}/stream → SSE 스트리밍.
@@ -15,7 +16,7 @@ import uuid
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -26,12 +27,13 @@ from sqlalchemy.orm import selectinload
 
 from storytale.api.auth_router import CurrentUserDep
 from storytale.api.dependencies import get_db
+from storytale.db.models import ChildProfile as ChildProfileModel
 from storytale.db.models import Story as StoryModel
 from storytale.db.models import StoryPage as StoryPageModel
-from storytale.interpreter.intent_analyzer import IntentAnalyzer
+from storytale.interpreter.intent_analyzer import IntentAnalyzer, RejectedIntentError
 from storytale.interpreter.llm_client import create_llm_client
 from storytale.interpreter.plan_reviser import PlanReviser
-from storytale.interpreter.preview_generator import PreviewGenerator
+from storytale.interpreter.preview_generator import PreviewGenerator, StoryPreview
 from storytale.interpreter.scene_planner import ScenePlan, ScenePlanner
 from storytale.interpreter.story_orchestrator import StoryOrchestrator
 from storytale.interpreter.story_personalizer import ChildProfile, StoryPersonalizer
@@ -97,6 +99,46 @@ class GenerateStoryRequest(BaseModel):
             msg = f"style은 {VALID_STYLES} 중 하나여야 합니다."
             raise ValueError(msg)
         return v
+
+
+# S30a — 부모 서술형 입력으로부터 ScenePlan + StoryPreview를 만드는 엔드포인트
+# (Phase A + B 노출). 모바일 서술형 입력 화면(S30b)이 호출한다.
+
+# IntentCategory: contracts/story-engine.ts 와 1:1 매핑.
+IntentCategory = Literal[
+    "value_teaching",
+    "interest_story",
+    "problem_solving",
+    "celebration",
+]
+
+# security.md: 부모 서술형 입력은 최대 500자.
+PARENT_TEXT_MAX_LENGTH = 500
+
+# S31에서 부모가 명시적으로 스타일을 고를 때까지 사용할 미리보기 기본값.
+DEFAULT_PREVIEW_STYLE = "watercolor"
+
+
+class PlanStoryRequest(BaseModel):
+    """부모 서술형 입력 → ScenePlan 생성 요청."""
+
+    parent_text: str = Field(
+        min_length=1,
+        max_length=PARENT_TEXT_MAX_LENGTH,
+    )
+    purpose_category: IntentCategory
+    child_id: str
+
+
+class PlanStoryResponse(BaseModel):
+    """ScenePlan + 부모 미리보기 응답.
+
+    S30(서술형 입력) 화면에서 받아 그대로 S31(미리보기/수정) 화면에 전달한다.
+    style은 S31에서 부모가 확정하므로 여기서는 기본값(watercolor)이 사용된다.
+    """
+
+    plan: ScenePlan
+    preview: StoryPreview
 
 
 class GenerateStoryResponse(BaseModel):
@@ -375,8 +417,108 @@ async def _run_generation(
 
 
 # ---------------------------------------------------------------------------
+# 헬퍼 (S30a)
+# ---------------------------------------------------------------------------
+
+
+async def _load_owned_child_profile(
+    db: AsyncSession,
+    user_id: str,
+    child_id: str,
+) -> ChildProfileModel:
+    """child_id를 받아 본인 소유의 ChildProfile DB 행을 반환한다.
+
+    소유자가 아니거나 존재하지 않으면 404를 던진다 (정보 노출 방지를 위해
+    "존재하지 않음"과 "다른 사용자의 것"을 동일하게 처리).
+    UUID 형식이 아닌 child_id도 404로 처리 (S20 패턴 일치).
+    """
+    try:
+        child_uuid = uuid.UUID(child_id)
+        user_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=404, detail="아이 프로필을 찾을 수 없어요"
+        ) from None
+
+    result = await db.execute(
+        select(ChildProfileModel).where(ChildProfileModel.id == child_uuid)
+    )
+    profile = result.scalar_one_or_none()
+    if profile is None or profile.user_id != user_uuid:
+        raise HTTPException(status_code=404, detail="아이 프로필을 찾을 수 없어요")
+
+    return profile
+
+
+def _to_interpreter_child(profile: ChildProfileModel) -> ChildProfile:
+    """DB ChildProfile → interpreter 도메인 ChildProfile 매핑."""
+    return ChildProfile(
+        child_id=str(profile.id),
+        name=profile.name,
+        age=profile.age,
+        gender=profile.gender,
+        comfort_object=profile.comfort_object,
+        friend_name=profile.friend_name,
+        favorite_animal=profile.favorite_animal,
+    )
+
+
+# ---------------------------------------------------------------------------
 # 엔드포인트
 # ---------------------------------------------------------------------------
+
+
+@router.post("/plan", response_model=PlanStoryResponse)
+async def plan_story(
+    request: PlanStoryRequest,
+    orchestrator: OrchestratorDep,
+    db: DbDep,
+    current_user_id: CurrentUserDep,
+) -> PlanStoryResponse:
+    """부모 서술형 텍스트 → ScenePlan + StoryPreview (S30a).
+
+    S30(서술형 입력) 화면이 호출. 응답은 그대로 S31(미리보기/수정) 화면에 전달된다.
+    style은 S31에서 부모가 확정하므로 미리보기에는 기본값(watercolor)이 사용된다.
+    """
+    profile = await _load_owned_child_profile(
+        db=db, user_id=current_user_id, child_id=request.child_id
+    )
+    child = _to_interpreter_child(profile)
+
+    try:
+        plan = await orchestrator.interpret_and_plan(
+            parent_text=request.parent_text,
+            purpose_category=request.purpose_category,
+            child=child,
+        )
+        preview = await orchestrator.get_preview(
+            plan=plan,
+            style=DEFAULT_PREVIEW_STYLE,
+            child_name=child.name,
+        )
+    except RejectedIntentError as exc:
+        # api-conventions.md: {"detail": "...", "code": "ERROR_CODE"}
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(exc), "code": "REJECTED_INTENT"},
+        ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("plan_story_failed user_id=%s", current_user_id)
+        raise HTTPException(
+            status_code=500,
+            detail="이야기 설계 중 문제가 생겼어요. 잠시 후 다시 시도해주세요.",
+        ) from exc
+
+    logger.info(
+        "plan_story_done user_id=%s child_id=%s purpose=%s scenes=%d",
+        current_user_id,
+        request.child_id,
+        request.purpose_category,
+        len(plan.scenes),
+    )
+    return PlanStoryResponse(plan=plan, preview=preview)
 
 
 @router.post("/generate", status_code=202, response_model=GenerateStoryResponse)

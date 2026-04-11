@@ -19,6 +19,15 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
       >
         <Text style={styles.profileButtonText}>아이 프로필 만들기</Text>
       </Pressable>
+
+      <Pressable
+        style={styles.startButton}
+        onPress={() => navigation.navigate("PurposeSelect")}
+        accessibilityLabel="이야기 만들기 시작"
+        accessibilityRole="button"
+      >
+        <Text style={styles.startButtonText}>이야기 만들기</Text>
+      </Pressable>
     </View>
   );
 };
@@ -62,5 +71,22 @@ const styles = StyleSheet.create({
     fontFamily: "Pretendard-Bold",
     fontSize: 17,
     color: theme.colors.white,
+  },
+  startButton: {
+    marginTop: 16,
+    backgroundColor: theme.colors.white,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: theme.colors.primary,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    minHeight: 52,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  startButtonText: {
+    fontFamily: "Pretendard-Bold",
+    fontSize: 17,
+    color: theme.colors.primary,
   },
 });
