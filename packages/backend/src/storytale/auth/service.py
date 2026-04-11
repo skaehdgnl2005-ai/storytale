@@ -3,14 +3,17 @@
 계약: docs/contracts/user-service.ts (AuthService)
 """
 
+import functools
 import logging
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+import bcrypt
 import jwt
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from storytale.auth.schemas import AuthTokens, SocialUserInfo
@@ -26,6 +29,20 @@ JWT_ALGORITHM = "HS256"
 DEFAULT_ACCESS_EXPIRE_MINUTES = 1440  # 24시간
 DEFAULT_REFRESH_EXPIRE_DAYS = 7
 BLACKLIST_KEY_PREFIX = "token_blacklist:"
+
+# S27b 비밀번호 해싱
+DEFAULT_BCRYPT_ROUNDS = 12  # prod 기본값. dev 는 BCRYPT_ROUNDS=4 env 로 오버라이드
+MAX_PASSWORD_BYTES = 72  # bcrypt null-terminated 입력 제한 (schemas.py 와 동일 값)
+EMAIL_PROVIDER = "email"  # User.provider 값. 소셜 판정은 password_hash IS NULL 로 함
+
+
+# ---------------------------------------------------------------------------
+# S27b 예외
+# ---------------------------------------------------------------------------
+
+
+class EmailAlreadyExistsError(Exception):
+    """이메일이 이미 존재하는 경우. 라우터에서 409 로 변환."""
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +100,43 @@ def create_blacklist() -> TokenBlacklist:
         return RedisBlacklist(redis_url)
     logger.warning("REDIS_URL 미설정 — 인메모리 블랙리스트 사용 (개발 전용)")
     return InMemoryBlacklist()
+
+
+# ---------------------------------------------------------------------------
+# S27b 비밀번호 해싱
+# ---------------------------------------------------------------------------
+
+
+def _hash_password(plain: str) -> str:
+    """bcrypt 해시 생성.
+
+    BCRYPT_ROUNDS 환경변수를 **매 호출마다** 읽어 테스트의 monkeypatch.setenv
+    호환성을 보장. 성능 영향: os.getenv ~100ns vs bcrypt ~10-250ms → 무시.
+    """
+    rounds = int(os.getenv("BCRYPT_ROUNDS", str(DEFAULT_BCRYPT_ROUNDS)))
+    return bcrypt.hashpw(
+        plain.encode("utf-8"),
+        bcrypt.gensalt(rounds=rounds),
+    ).decode()
+
+
+def _verify_password(plain: str, hashed: str) -> bool:
+    """bcrypt 해시 비교. 72바이트 초과는 silent truncate (bcrypt 자동)."""
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+
+
+@functools.cache
+def _get_dummy_hash() -> str:
+    """Constant-time login 용 dummy hash. 프로세스 lifetime 내 1회만 계산.
+
+    공격자가 존재하지 않는 이메일로 로그인 스팸할 때 매 요청마다 bcrypt.hashpw
+    를 실행하면 prod 라운드 12 기준 ~250ms × 요청 수로 CPU 가 포화된다. 캐시로
+    첫 로그인 시점에 1회만 계산 후 프로세스 종료까지 고정.
+
+    BCRYPT_ROUNDS 런타임 변경 시 서버 재시작 필요(허용 가능한 제약).
+    테스트 격리가 필요하면 `_get_dummy_hash.cache_clear()` 호출.
+    """
+    return _hash_password("constant-time-login-dummy-value")
 
 
 class AuthService:
@@ -191,12 +245,19 @@ class AuthService:
         except SocialAuthError as e:
             raise ValueError(str(e)) from e
 
+    async def _find_user_by_email(self, email: str) -> User | None:
+        """이메일로 사용자 조회. 없으면 None.
+
+        호출자는 이 메서드 호출 전에 email 을 정규화(소문자화) 해야 한다.
+        현재 소셜 경로는 정규화 없이 호출 — S38 배포 전 별도 스크립트로 백필.
+        """
+        stmt = select(User).where(User.email == email)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def _find_or_create_user(self, user_info: SocialUserInfo) -> User:
         """이메일로 기존 사용자 조회, 없으면 생성."""
-        stmt = select(User).where(User.email == user_info.email)
-        result = await self.db.execute(stmt)
-        user = result.scalar_one_or_none()
-
+        user = await self._find_user_by_email(user_info.email)
         if user is None:
             user = User(
                 id=uuid.uuid4(),
@@ -206,7 +267,6 @@ class AuthService:
             self.db.add(user)
             await self.db.commit()
             await self.db.refresh(user)
-
         return user
 
     def _issue_tokens(self, user_id: str) -> AuthTokens:
