@@ -319,6 +319,36 @@ class AuthService:
 
         return self._issue_tokens(str(user.id))
 
+    async def login_with_email(self, email: str, password: str) -> AuthTokens:
+        """이메일+비번 로그인 → JWT 발급 (constant-time).
+
+        3가지 실패 케이스(이메일 없음 / 비번 틀림 / 소셜 전용 유저)가 동일한
+        타이밍 + 동일한 에러 메시지를 반환하여 이메일 enumeration 방지.
+
+        Raises:
+            ValueError: 로그인 실패 (라우터에서 401 로 변환).
+
+        Returns:
+            AuthTokens: access + refresh 쌍.
+        """
+        normalized_email = email.lower()
+        user = await self._find_user_by_email(normalized_email)
+
+        # constant-time: user 가 없거나 password_hash 가 NULL 이면 dummy hash
+        # 로 대체. bcrypt 타이밍이 모든 케이스에서 균일해짐.
+        stored_hash = (
+            user.password_hash
+            if (user and user.password_hash)
+            else _get_dummy_hash()
+        )
+        is_valid = _verify_password(password, stored_hash)
+
+        if not (user and user.password_hash and is_valid):
+            # 동일한 에러 메시지 + 동일한 타이밍 → 공격자에게 힌트 0
+            raise ValueError("이메일 또는 비밀번호가 올바르지 않아요")
+
+        return self._issue_tokens(str(user.id))
+
     def _issue_tokens(self, user_id: str) -> AuthTokens:
         """액세스 + 리프레시 토큰 쌍 발급."""
         return AuthTokens(
