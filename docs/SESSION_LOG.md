@@ -4,6 +4,212 @@
 
 ---
 
+## S27b 세션 1 — 이메일+비밀번호 로그인 백엔드 (2026-04-11)
+
+### 완료된 것
+- **이메일 회원가입/로그인 백엔드 전체** — `POST /auth/register/email` + `POST /auth/login/email` 추가. 기존 JWT 파이프라인(`_issue_tokens`) 재사용으로 refresh token 발급 신규 코드 0줄. 기존 소셜 로그인 엔드포인트(`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/consent`, `/auth/me`) 는 건드리지 않음.
+- **`User.password_hash` 컬럼 추가** — `Column(String, nullable=True)`, 소셜 유저는 NULL 유지로 하위 호환. alembic migration `b2c3d4e5f6a7_add_password_hash_to_users.py` 수동 작성 (autogenerate 는 기존 JSONB diff 를 잡아서 사용 안 함).
+- **의존성 추가** — `bcrypt>=4.1,<5` (해싱) + `pydantic[email]>=2.0,<3` (EmailStr 검증, `email-validator` 자동 pull).
+- **Constant-time login** — `@functools.cache` 로 lazy init 된 `_get_dummy_hash()` 를 써서 3가지 실패 케이스(이메일 없음 / 비번 틀림 / 소셜 전용 유저)가 동일한 타이밍(~250ms prod) + 동일한 에러 메시지를 반환. 이메일 enumeration 방지 + DoS 방어.
+- **Race condition 방어** — `register_with_email` 의 `IntegrityError` catch → rollback → `_find_user_by_email` 재확인 패턴. 다른 원인(NOT NULL/FK/Check)의 IntegrityError 는 500 으로 전파하여 디버깅 단서 보존.
+- **이메일 정규화** — `@field_validator("email", mode="before")` + `strip()` pre-validator (모바일 복붙 UX) + 서비스 계층에서 `email.lower()` (EmailStr 의 도메인만 자동 정규화하는 부분을 로컬파트까지 확장).
+- **테스트 스위트** — `test_s27b_email_auth.py` 15 케이스 (TestRegisterEmail 8 + TestLoginEmail 6 + TestMeEndpointWithEmailUser 1).
+
+### TDD 워크플로우
+1. **RED** — `tests/test_s27b_email_auth.py` 15 케이스 작성 → `pytest` → 전 케이스 404 로 실패.
+2. **GREEN 1** — `pyproject.toml` 의존성 추가 + `pip install -e .` 로 `bcrypt 4.3.0` + `email-validator 2.3.0` + `dnspython 2.8.0` 설치.
+3. **GREEN 2** — `models.py::User.password_hash` + alembic migration.
+4. **GREEN 3** — `schemas.py` 에 `EmailRegisterRequest`/`EmailLoginRequest` 추가 (EmailStr + strip + min_length 8 + max 72바이트).
+5. **GREEN 4** — `service.py` 에 `EmailAlreadyExistsError` + `_hash_password`/`_verify_password`/`_get_dummy_hash`/`_find_user_by_email` 헬퍼 + `_find_or_create_user` 리팩터링.
+6. **GREEN 5** — `service.py::register_with_email` (IntegrityError race 방어).
+7. **GREEN 6** — `service.py::login_with_email` (constant-time 패턴).
+8. **GREEN 7** — `auth_router.py` 에 두 엔드포인트 + 409/401 에러 envelope. **15/15 전 케이스 GREEN.**
+9. **회귀** — S27b 15 + S27 12 + S35b 8 + S30a + S31a + S34 + S35a = **80/80 통과**.
+10. **린트** — S27b 파일 ruff 3건 수정 (E501 라인 길이, RUF002/003 ambiguous `×`). 기존 code 의 ruff 위반 118건은 S27b 범위 밖이라 건드리지 않음. `ruff format` 이 기존 `BookRecommendation.__table_args__` 를 재포맷하려 해서 명시적으로 되돌림 (S27b 범위 엄수).
+11. **`dev_token.py` smoke** — `test.db` 삭제 후 재실행: `[Created] dev user` + 유효 JWT 발급 → 재실행 시 `[Found existing]` 같은 UUID 반환. 새 컬럼 추가가 기존 동작 안 깸.
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/backend/src/storytale/db/models.py::User.password_hash` — `Column(String, nullable=True)` 컬럼 추가
+  - `packages/backend/alembic/versions/b2c3d4e5f6a7_add_password_hash_to_users.py` — 수동 작성 migration (down_revision: `a1b2c3d4e5f6`)
+  - `packages/backend/src/storytale/auth/schemas.py::EmailRegisterRequest` — EmailStr + `_strip_email` pre-validator + `_password_bytes_within_bcrypt_limit` field_validator
+  - `packages/backend/src/storytale/auth/schemas.py::EmailLoginRequest` — EmailStr + `_strip_email` pre-validator (비번 길이 검증 없음 — 정책 변경 회귀 방지)
+  - `packages/backend/src/storytale/auth/schemas.py::MIN_PASSWORD_LENGTH` = 8, `MAX_PASSWORD_BYTES` = 72
+  - `packages/backend/src/storytale/auth/service.py::EmailAlreadyExistsError` — 모듈 수준 예외 클래스 (RejectedIntentError 선례)
+  - `packages/backend/src/storytale/auth/service.py::_hash_password` — `os.getenv("BCRYPT_ROUNDS", "12")` 매 호출 조회 (테스트 monkeypatch 호환)
+  - `packages/backend/src/storytale/auth/service.py::_verify_password` — `bcrypt.checkpw`
+  - `packages/backend/src/storytale/auth/service.py::_get_dummy_hash` — `@functools.cache` lazy init
+  - `packages/backend/src/storytale/auth/service.py::_find_user_by_email` — 신규 헬퍼
+  - `packages/backend/src/storytale/auth/service.py::_find_or_create_user` — `_find_user_by_email` 재사용으로 리팩터링 (외부 동작 동일)
+  - `packages/backend/src/storytale/auth/service.py::AuthService.register_with_email(email, password)` — 선확인 + INSERT + race condition 방어
+  - `packages/backend/src/storytale/auth/service.py::AuthService.login_with_email(email, password)` — constant-time 패턴
+  - `packages/backend/src/storytale/api/auth_router.py::register_email` — POST /auth/register/email → `EmailAlreadyExistsError → 409 + {message, code}`
+  - `packages/backend/src/storytale/api/auth_router.py::login_email` — POST /auth/login/email → `ValueError → 401`
+  - `packages/backend/tests/test_s27b_email_auth.py` — 15 케이스 TDD 스위트
+- **계약 대비 변경점**:
+  - `contracts/user-service.ts::AuthService` 는 이메일+비번 로그인을 명시하지 않음. S27b 는 S27 의 JWT 파이프라인 재사용 조건에서 새 엔드포인트 2개를 추가 — 계약 확장 성격.
+  - `/auth/login/email` 실패 시 3가지 케이스(이메일 없음 / 비번 틀림 / 소셜 전용 유저) 가 동일한 401 + 동일 메시지 반환 — 보안 원칙(이메일 enumeration 방지) 우선. 핸드오프 원문은 "소셜 계정으로 가입된 이메일입니다" 힌트를 제안했으나 구현에서 기각.
+  - inner code envelope 필드 순서 `{"message": ..., "code": ...}` 로 `stories/router.py:677` 의 `REJECTED_INTENT` 패턴과 일관. `.claude/rules/api-conventions.md` 는 `{detail, code}` 로 명시하지만 실제 구현은 FastAPI HTTPException 제약으로 nested 되어 있음 (드리프트).
+- **환경변수**:
+  - `BCRYPT_ROUNDS`: 기본값 `12` (prod). dev/test 는 `4` 로 설정하여 테스트 속도 확보. `.env.example` 반영 필요 (TODO).
+- **의존 모듈 사용**:
+  - `AuthService.create_access_token` / `create_refresh_token` / `_issue_tokens` (S27) — register/login 양쪽에서 재사용. 신규 토큰 로직 0줄.
+  - `AuthService.decode_token` / `refresh_token` (S27) — 이메일 유저의 refresh token 도 `sub` + `type="refresh"` 만 보므로 변경 없이 동작.
+  - `EmailStr` / `pydantic[email]` — RFC 5322 + IDN 검증, 도메인 자동 소문자화, 로컬파트 원본 보존.
+  - `bcrypt.hashpw` / `gensalt(rounds=N)` / `checkpw` (신규) — 72바이트 초과 입력은 silent truncate.
+
+### 설계 문서 / 플랜 참조
+- 설계 스펙: `docs/superpowers/specs/2026-04-11-s27b-session1-email-auth-backend-design.md`
+- 구현 플랜: `docs/superpowers/plans/2026-04-11-s27b-session1-email-auth-backend.md`
+- 두 문서 모두 브레인스토밍 단계에서 7개 설계 결정 아이템(해싱 라이브러리, 중복 에러 envelope, 비번 정책, 이메일 검증, 교차 로그인 정책, API 경로, refresh token)을 하나씩 검토한 결과 반영.
+
+### 다음 세션에 알려줄 것
+- **세션 2 (모바일) 진입 조건 모두 충족** — 세션 1 완료 판정 체크리스트 (설계 스펙 §7) 전부 통과. 다음은 `docs/S27b-handoff.md` 의 "세션 2 시작 시 Claude 에게 전달할 프롬프트" 를 사용하여 새 세션으로 진입.
+- **API 경로 확정** — `POST /api/v1/auth/register/email`, `POST /api/v1/auth/login/email`. 모바일 `src/api/client.ts` 의 `loginWithEmail`/`registerWithEmail` 함수는 이 경로와 request body `{email, password}` 를 그대로 사용.
+- **에러 응답 형식** — 409 에는 inner code `EMAIL_ALREADY_EXISTS`. 401 에는 inner code 없음(string detail 만). 모바일 `parseErrorBody` 가 이미 이 형식을 파싱하므로 추가 작업 불필요. 분기 코드:
+  ```typescript
+  if (err.status === 409 && err.code === "EMAIL_ALREADY_EXISTS") { ... }
+  if (err.status === 401) { ... }
+  ```
+
+### 발견된 이슈 / 이월 사항
+
+- 🚨 **(보안 높음) `/auth/logout` 은 현재 완전한 no-op** — `auth_router.py:102-115` 가 `auth_service.logout()` 을 호출하지 않고 토큰 디코드만 수행. 추가로 router(access token) ↔ service(refresh token) 계층 간 토큰 타입 가정 불일치. 블랙리스트에 아무것도 추가되지 않아 refresh token 이 여전히 유효 → 로그아웃 후에도 `/auth/refresh` 로 새 access token 발급 가능. 수정은 설계 재검토 필요 (router 가 refresh_token 을 body 로 받을지, access token 의 jti 를 블랙리스트 키로 쓸지). **권장: S27d 신규 태스크로 분리**. 세션 2 모바일 작업에는 능동 로그아웃 UI 가 원래 계획에 없으므로 영향 없음.
+
+- **(중간) `/auth/login` (social) 의 `except Exception → 500` 버그** — `auth_router.py:66-77`. `SocialAuthError`/`ValueError` 모두 500 으로 변환되어 클라이언트는 401 을 받아야 할 상황에도 500 수신. `/auth/refresh` 는 같은 상황에서 `except ValueError → 401` 로 올바르게 처리함. S27b 는 새 엔드포인트에서 `/auth/refresh` 패턴을 따랐고 기존 `/auth/login` 은 의도적으로 건드리지 않음. S27d 에서 함께 수정 권장.
+
+- **(중간) 기존 백엔드 코드의 ruff 위반 118건** — `ruff check src tests` 실행 시 121건 중 S27b 3건 제외하고 118건이 기존 코드의 누적 위반 (대부분 RUF002/003 한글 문서의 ambiguous 문자, E501 line too long). S38 배포 전 별도 cleanup 태스크 권장.
+
+- **(낮음) `api-conventions.md` ↔ 실제 구현 드리프트** — `.claude/rules/api-conventions.md` 는 `{detail: "메시지", code: "ERROR_CODE"}` 로 명시하지만 실제 구현은 FastAPI `HTTPException` 제약으로 `{detail: {message, code}}` nested 구조. 별도 문서 동기화 태스크 필요.
+
+- **(낮음) 기존 social 유저 이메일 case 정규화 미적용** — `_find_or_create_user` 는 소셜 프로바이더 반환값을 그대로 비교. Apple 등 일부 프로바이더가 원본 case 로 반환할 수 있어서 배포 시점에 `UPDATE users SET email = LOWER(email)` 필요. **S38 배포 전 체크리스트**: `scripts/s38_pre_deploy_normalize_emails.py` 작성 (dry-run + 충돌 감지 + 수동 해소 경로).
+
+- **(낮음) DB 레벨 case-insensitive unique index 부재** — 현재 서비스 계층 `email.lower()` 로 방어. admin 스크립트나 ORM bypass 는 뚫림. 궁극적 방어는 Postgres `CREATE UNIQUE INDEX ... ON users (LOWER(email))` 또는 `citext`. S27c 또는 별도 hardening.
+
+- **(미래) 비밀번호 변경 시 refresh token 일괄 무효화 메커니즘 필요** — 현재 `_blacklist` 는 개별 토큰 키 기반. user-wide 무효화는 `User.token_version` 필드 + JWT payload 에 version 포함, 또는 user-wide Redis 블랙리스트 키 패턴, 또는 refresh token 개별 관리 테이블 중 선택 필요. 비번 변경 기능 도입 시 결정.
+
+- **(기록) `provider` 컬럼 의미** — "최초 가입 경로" 로 고정된 historical marker. 시나리오 (b) email 유저가 `/auth/login` (social) 재접속 시 `_find_or_create_user` 가 기존 유저 반환 + provider 갱신 없음 → 이 값은 로직 분기에 **사용 금지**. 소셜/로컬 분기는 `password_hash IS NULL` 로 판단.
+
+- **(기록) 암묵적 계정 연결** — `_find_or_create_user` 는 이메일만으로 조회. email 유저가 같은 이메일로 소셜 로그인 시 기존 로컬 계정에 JWT 발급됨. OIDC "이메일 소유권 증명" 합의 기반의 의도된 동작. UX 개선 필요 시 S27c.
+
+- **(기술 부채) `.env.example` 에 `BCRYPT_ROUNDS` 반영 필요** — dev=4, prod=12 설정 문서화. S38 배포 전 체크리스트.
+
+---
+
+## S35b — 프론트-백 통합 E2E (2026-04-11)
+
+### 완료된 것
+- **모바일 API contract E2E 테스트** — `packages/backend/tests/test_s35b_frontend_contract_e2e.py` (8 케이스). 모바일 `packages/mobile/src/api/{client,profiles,stories}.ts` 가 실제로 때리는 HTTP 시퀀스(로그인 → 프로필 등록 → 목록 → `/stories/plan` → `/stories/plan/revise` → `/stories/generate` → 잡 폴링 → `GET /stories/{id}` → `GET /stories` → `DELETE /stories/{id}` → `GET`로 404 확인)를 한 테스트에 묶어 end-to-end 로 검증. 각 응답의 JSON 키 세트를 mobile TypeScript interface 와 1:1 assertion 으로 매칭 → 백엔드가 필드 추가/제거/renaming 시 반드시 실패하는 contract 회귀 방어망 구축.
+- **테스트 범주** (총 8 케이스, 5 클래스):
+  1. `TestFullMobileContractFlow` (1): 10단계 happy-path 시퀀스 + 각 응답의 와이어 형태 인라인 검증(`AuthTokens`, `ChildProfile`, `PlanStoryResponse`, `ScenePlan`, `PlannedScene`, `StoryPreview`, `PlanRevisionResponse`, `GenerateStoryResponse`, `JobStatusResponse`, `GeneratedScene`, `StoryDetailResponse`, `StoryPageDetail`, `StoryListResponse`, `StoryListItem` 14종 모두 키 세트 완전 일치).
+  2. `TestMobileErrorEnvelope` (3): `{error: {code, message}}` 래핑 형식이 mobile `client.ts::parseErrorBody` 가 기대하는 모양과 일치 — 401(no auth header)/404(unknown child)/400 + RejectedIntent inner code(`{message: {code: "REJECTED_INTENT", message: ...}}`).
+  3. `TestExpiredJWTContract` (2): 만료된 JWT → 401 + wrapped envelope. `POST /stories/plan` 입구 + **`GET /stories/jobs/{job_id}` 폴링 중간** 두 지점.
+  4. `TestOwnershipContract` (1): 사용자 A가 만든 스토리를 사용자 B가 조회/삭제 시도 → 둘 다 404(소유자 정보 노출 방지). 원본은 A에게 여전히 200 으로 보존.
+  5. `TestDeleteIdempotencyContract` (1): 동일 스토리 DELETE 두 번 → 첫 번째 204, 두 번째 404. mobile LibraryScreen/ViewerScreen 이 404 를 "이미 삭제됨" 으로 처리하는 contract.
+- **실제 계약 균열 1건 발견 및 수정** — S35b contract E2E 가 **S35a 에서 못 잡은 보안 규칙 위반**을 찾아냈다: `GET /stories/jobs/{job_id}` + `GET /stories/jobs/{job_id}/stream` 두 엔드포인트가 `CurrentUserDep` 없이 열려 있어서 누구든 job_id 만 알면 타인의 생성 진행률 + 완료 후 `story_id` 까지 조회 가능했음(security.md "모든 API 에 소유자 검증" 규칙 위반). **테스트 `test_expired_token_at_polling_returns_401` 가 정확히 이 균열을 짚어 1회 RED** → 라우터 수정 → GREEN.
+  - `JobState.__init__(..., user_id: str | None = None)` 추가 — 잡에 소유자 JWT sub 를 저장.
+  - `JobManager.create_job(..., user_id=None)` 확장 — 하위 호환(S19/S35a 패턴 유지) 위해 기본 None.
+  - `generate_story` 엔드포인트 → `job_manager.create_job(total_scenes=..., user_id=current_user_id)` 로 JWT 소유자 기록.
+  - `get_job_status` + `stream_job_events` → `CurrentUserDep` 의존성 추가 + `job.user_id is None or job.user_id != current_user_id` → 404(소유자 정보 노출 방지 일관).
+
+### 리뷰어 피드백 수용 (브레인스토밍 단계)
+S35b 범위 결정 과정에서 외부 리뷰어의 지적을 반영하여 3가지 보강을 수행:
+1. **"형식만 맞추고 끝" 자의식 결여 완화** — 단순 happy-path 만이 아니라 JWT 만료/소유자 검증/DELETE 멱등성 3가지 타이밍·인증 케이스를 의무 포함.
+2. **후속 태스크 "언급만 하고 망각" 방지** — `docs/TASK_BACKLOG.md` 에 Phase 8 신설, I1(mobile 단위/컴포넌트 테스트 인프라 복구) + I2(실기기 UI E2E 인프라 Detox/Maestro/Playwright 평가) 2개 태스크를 즉시 등재. 세션로그 S29~S34 5회 연속 "mobile jest 미복구" 문구가 기록된 사각지대에 대한 공식 트랙 지정.
+3. **실기기 UI 수동 스모크 의무화** — 아래 "실기기 수동 스모크" 섹션에 결과 기록 필드 추가. 자동화가 못 잡는 UI/상태/네비게이션 층을 사람 1회 탭으로 덮음.
+
+### TDD 워크플로우
+1. **RED 1** — `tests/test_s35b_frontend_contract_e2e.py` 작성(8 케이스) → `pytest tests/test_s35b_frontend_contract_e2e.py -x` → `TestExpiredJWTContract::test_expired_token_at_polling_returns_401` 가 `assert 200 == 401` 로 실패. 만료된 토큰으로 `/jobs/{job_id}` 를 폴링해도 서버가 200 을 돌려주는 **실제 contract 균열** 발견(보안 규칙 위반).
+2. **GREEN 1 — 라우터 수정** — `router.py` 에 `JobState.user_id` 필드 + `JobManager.create_job(user_id=...)` + `generate_story` 의 `current_user_id` 주입 + `get_job_status`/`stream_job_events` 의 `CurrentUserDep` 의존성 + 404 통일 소유자 검증 추가.
+3. **회귀 확인** — 전체 스토리 경로 회귀: `pytest tests/test_s35b_frontend_contract_e2e.py tests/test_s19_story_api.py tests/test_s20_story_storage.py tests/test_s30a_plan_endpoint.py tests/test_s31a_plan_revise_endpoint.py tests/test_s34_story_delete_endpoint.py tests/test_s35a_text_illustration_e2e.py` → **74/74 통과**. S19/S20/S35a 의 기존 `dependency_overrides[get_current_user_id] = lambda: TEST_USER_ID` 패턴이 generate 와 poll 양쪽에서 같은 user_id 를 주입하므로 하위 호환 유지.
+4. **린트** — `ruff check src/storytale/api/stories/router.py tests/test_s35b_frontend_contract_e2e.py` → E501 2건(요약 문자열/docstring) → 줄바꿈 → 재실행 통과. `ruff format` → 2파일 재포맷 → 재실행 74/74 통과.
+
+### 실기기 수동 스모크 (G4.5 겸)
+- **상태**: ✅ **완료 (2026-04-11, 같은 세션 내 수행)**. 9화면 탭 체크리스트 전 항목 정상 동작 확인.
+- **수행 환경**:
+  - 기기: iOS 실기기 + Expo Go
+  - 네트워크: **폰 개인용 핫스팟** (원래 Wi-Fi 는 client isolation 으로 폰↔PC 도달 불가 — 10.123.133.x 대역 건물 공유망. 핫스팟 전환 후 PC 에 `172.20.10.10` 할당됨)
+  - 모바일 env: `packages/mobile/.env.local` 에 `EXPO_PUBLIC_API_URL=http://172.20.10.10:8000/api/v1` 설정 → `.gitignore` 로 보호됨
+  - 백엔드: `uvicorn storytale.app:app --reload --port 8000 --host 0.0.0.0` ( `--host 0.0.0.0` 필수, localhost 바인딩이면 폰에서 도달 불가)
+  - **임시 인증 우회**: S27 의 모바일 로그인 UI 가 **전무** 하다는 사실을 발견 → 본 스모크 직전에 `packages/backend/scripts/dev_token.py` 신설하여 dev 유저 + 24시간 JWT 발급 → `packages/mobile/src/api/client.ts:9` 에 하드코딩 주입 → 스모크 완료 후 `git checkout` 으로 원복. S27b 에서 정식 해결 예정.
+- **9화면 결과 체크리스트** (전체 정상):
+  - ✅ 화면 1: Home — 3 버튼 렌더, 폰트 로드 정상
+  - ✅ 화면 2: ProfileForm — 입력 → `POST /api/v1/profiles` 201 → Home 복귀
+  - ✅ 화면 3: Home → "이야기 만들기" → PurposeSelect 전환
+  - ✅ 화면 4: PurposeSelect — 4 카드 렌더, 선택 → DescriptiveInput 전환
+  - ✅ 화면 5: DescriptiveInput — parent_text 입력 → `POST /api/v1/stories/plan` 200 (실제 Claude API 호출 성공) → Preview 전환
+  - ✅ 화면 6: Preview — 요약/장면 하이라이트 렌더, 수정 입력 → `POST /api/v1/stories/plan/revise` 200 → 확정 → Generation 전환
+  - ✅ 화면 7: Generation — 진행률 바 + 장면 카드 점진 등장(1.5초 폴링), 뒤로가기 차단 확인, 완료 시 CTA → Viewer 전환(navigation.reset)
+  - ✅ 화면 8: Viewer — 페이지 스와이프(pagingEnabled) 정상 동작, 하단 인디케이터 갱신, **일러스트 영역은 S26 미연결로 placeholder 🎨 "그림은 곧 도착해요"** 예상대로 표시, 헤더 "지우기" CTA 노출
+  - ✅ 화면 9: Library — 카드 렌더, 탭 → Viewer 재진입 → goBack 복귀, long-press → Alert → 확인 → 카드 제거 + 빈 상태 UI 전환
+- **발견된 이슈(자동화 범위 외)**:
+  1. **(Critical) 모바일 LoginScreen 전무** — S27 [완료] 표기에도 불구하고 `client.ts::setAccessToken` 호출 경로가 단 한 곳도 없음. 5개 화면에 `TODO(post-S27)` 주석 박혀 있음. **S27b (이메일+비밀번호 최소 로그인)** 신규 태스크로 분리 후 백로그 등재. 소셜 OAuth 카카오/구글/애플 전체는 S27c 로 분리(출시 직전). 자세한 설계/로드맵은 [docs/S27b-handoff.md](docs/S27b-handoff.md) 참조.
+  2. **Python 의 `.env` 자동 로드 부재** — `packages/backend/src` 어디에도 `load_dotenv`/`pydantic_settings` 사용 없음. `.env` 파일이 루트에 있어도 `os.getenv()` 는 전부 기본값으로 fallback 중. 본 스모크는 `$env:CLAUDE_API_KEY` 수동 export 로 우회. 기술 부채로 기록 — S27b 이후 `python-dotenv` 또는 `pydantic-settings` 도입하여 정리 권장.
+  3. **Alembic migration 과 SQLite 불일치** — 초기 migration(`76c2febda894_initial_schema.py`) 이 Postgres 전용 `JSONB` 를 사용해 SQLite 로는 `alembic upgrade head` 가 실패. 모델은 portable `JSON` 을 쓰므로 `dev_token.py` 가 `Base.metadata.create_all` 로 테이블을 직접 생성. 프로덕션 배포 전(S38) migration 을 portable 하게 수정하거나 Postgres-only 환경을 확정해야 함.
+  4. **네트워크 환경 의존성** — 건물 공유망(10.x)의 client isolation 으로 폰↔PC 직통이 불가. 개발 스모크는 iOS 핫스팟으로 우회 가능하나, 향후 팀원이 동일 스모크를 재현할 때 대안(cloudflared quick tunnel 등)이 필요할 수 있음. 이건 "이 프로젝트의 버그" 가 아니라 "스모크 실행 환경의 변동성" 으로 기록.
+- **수행 중 발생한 UI 층 이슈**: **없음**. 9화면 전체에서 렌더링/네비게이션/상태 전환/폴링/스와이프/Alert 흐름 모두 정상 동작. 본 스모크가 겨냥한 "contract E2E 가 못 잡는 UI 층 버그 검출" 목적에서 **UI 층 자체 버그는 0건** 확인됨. 발견된 이슈(1~4번) 는 모두 설계/인프라 층이며 UI 런타임 문제 아님.
+- **왜 수동인가**: mobile jest 미복구 지속 + Detox/Maestro 인프라 미도입(I2 로 후속). 자동화가 불안정할 때 억지로 CI에 붙이면 "flaky 테스트가 없는 것보다 나쁘다" 함정에 빠짐 → 안정화 전까지는 사람 1회 탭이 가장 싸고 안전한 UI 검증. 본 스모크가 이 판단의 정당성을 검증함 — contract E2E 가 놓친 Critical 수준의 "로그인 UI 전무" 갭을 실기기 첫 탭에 드러냄.
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/backend/src/storytale/api/stories/router.py::JobState` — `user_id: str | None` 필드 추가 (생성자 파라미터 포함)
+  - `packages/backend/src/storytale/api/stories/router.py::JobManager.create_job` — `user_id=None` 파라미터 추가(하위 호환)
+  - `packages/backend/src/storytale/api/stories/router.py::generate_story` — `current_user_id` 를 `create_job` 에 전달
+  - `packages/backend/src/storytale/api/stories/router.py::get_job_status` — `CurrentUserDep` 주입 + 소유자 검증 404 통일
+  - `packages/backend/src/storytale/api/stories/router.py::stream_job_events` — 동일 소유자 검증 정책(SSE)
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::TestFullMobileContractFlow` — 메인 10단계 happy-path E2E
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::TestMobileErrorEnvelope` — 에러 envelope 계약 3 케이스
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::TestExpiredJWTContract` — JWT 만료 2 케이스
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::TestOwnershipContract` — 소유자 검증 404 통일 정책
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::TestDeleteIdempotencyContract` — DELETE 멱등성
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::_login` — 실제 소셜 로그인 경로 재사용 헬퍼(S30a 패턴)
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::_expired_access_token` — AuthService 를 직접 사용해 negative timedelta 로 만료 토큰 생성
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::_poll_until_completed` — jobs 폴링 헬퍼
+  - `packages/backend/tests/test_s35b_frontend_contract_e2e.py::_create_profile` — mobile createProfile 과 동일 경로
+- **계약 대비 변경점**:
+  - `contracts/user-service.ts::AuthService` 는 HTTP 엔드포인트 형태만 정의하고 "잡 폴링에도 인증 필수" 를 명시하지 않음. S35b 는 security.md 의 "모든 API 에 소유자 검증" 규칙을 우선시해 `/jobs/{job_id}` 폴링과 SSE 에 소유자 검증을 적용. 모바일 `client.ts::apiFetch` 는 원래부터 모든 요청에 Authorization 헤더를 첨부하므로 mobile 측 변경은 불필요.
+  - `contracts/story-engine.ts::generateStory` 는 잡 상태 조회의 인증 요구 사항을 비워둠 → 본 세션이 "소유자만 접근 가능" 으로 contract 를 사실상 확장. 이는 security.md 와 일치하며 user-service.ts 의 "본인 리소스만 접근" 정책을 스토리 엔진에 투영한 것이다.
+  - `JobState.user_id` 필드 추가는 `JobStatusResponse` 에 포함되지 않음 — 응답에는 노출하지 않고 서버 내부 소유자 검증에만 사용. mobile `JobStatusResponse` 와이어 타입 변경 없음.
+- **환경변수**: 추가 없음. `JWT_SECRET_KEY`(S27) 만 사용.
+- **의존 모듈 사용**:
+  - `AuthService.create_access_token(expires_delta=timedelta(seconds=-1))` (S27) — 만료 토큰 픽스처 생성에 사용. DB 없이도 JWT 생성/검증 가능한 점을 이용(auth/service.py 의 `create_access_token` 은 self.jwt_secret 만 필요).
+  - `RejectedIntentError` (S12) — `test_rejected_intent_has_inner_code_for_mobile_switch` 에서 orchestrator `interpret_and_plan` side_effect 로 주입.
+  - `CharacterSheet`/`ConsistencyScore`/`OrchestratedIllustration` (S22b/S24/S26) — S35a 와 동일한 픽스처 헬퍼(`_make_fake_character_sheet`, `_make_passing_score`) 로 일러스트 오케스트레이터 모킹.
+  - `job_manager` (S19/router.py) — 테스트 픽스처 진입/종료 시 `clear()` 호출로 잡 격리.
+  - 모바일 와이어 타입 레퍼런스: `packages/mobile/src/api/stories.ts`(PlanStoryResponse/JobStatusResponse/StoryDetailResponse/StoryListResponse 등), `packages/mobile/src/api/profiles.ts`(ChildProfile), `packages/mobile/src/api/client.ts`(parseErrorBody envelope 형식). **본 세션 테스트의 assertion 이 이 파일들과 1:1 연결되어 있으므로** 모바일 와이어 타입 변경 시 테스트 수정이 필요함.
+
+### 다음 세션에 알려줄 것
+- **S27b 선행 필수** — 실기기 수동 스모크 중 발견된 Critical 갭(모바일 로그인 UI 전무) 을 메우는 작업. [docs/S27b-handoff.md](docs/S27b-handoff.md) 에 배경/범위/설계 결정 아이템 7개/TDD 로드맵/세션 1·2 프롬프트까지 모두 정리되어 있음. 새 세션 시작 시 이 핸드오프 파일을 먼저 로드하고 브레인스토밍으로 진입. 세션 1(백엔드 약 6파일) → 세션 2(모바일 약 4파일) 분할.
+- **S38 (배포) 진입 조건 충족** — S35b 자동화 + 수동 스모크 모두 완료. S27b 와 S38 중 어느 쪽이 우선일지는 사용자 판단 — 본 세션의 기본 추천은 **S27b → S38** 순서. 이유: (1) S38 Expo EAS 빌드 후에는 dev_token.py 하드코딩 해킹이 더 이상 불가(소스 배포 안 됨), (2) 정식 로그인 UI 없이 배포하면 어떤 테스터도 실제 앱을 쓸 수 없음, (3) S27b 는 1~2 세션이면 충분.
+- **S36/S37 우선순위 재검토 필요** — S36 브레인스토밍 중 "가드레일 JSON 편집 빈도 거의 0" 확인 → 본격 CRUD 어드민(옵션 B)은 과투자, 옵션 (E) "read-only + S37 대시보드와 묶음" 검토 중단. S27b → S38 먼저 진행 후 S36/S37 재평가 권장.
+- **S27 의 현재 동시성 제어 미구현** — security.md 는 "사용자당 동시 스토리 생성 1건 제한, 진행 중이면 409" 규칙을 명시하지만 router 에 구현 없음. 본 세션에서 S35b 범위를 넘어 별도 수정하지 않음. 의도적으로 테스트에 포함하지 않은 이유: (1) 기능 추가 필요 → S35b 의 "contract 검증" 범위 초과, (2) CLAUDE.md 파일 5개 제한 위반 위험. **Phase 8 의 I3 후보**(현재는 등재 안 됨, 다음 세션에서 추가 여부 결정 권장).
+- **발견된 이슈/이월 사항**:
+  - **(Critical, 신규 태스크화 완료) 모바일 로그인 UI 전무** — S27 [완료] 에도 불구하고 `setAccessToken` 호출 경로가 0건. S27b 로 분리 + 백로그 등재 + 핸드오프 문서(`docs/S27b-handoff.md`) 작성 완료.
+  - **(기술 부채) Python 이 `.env` 를 자동 로드하지 않음** — S27b 이후 `python-dotenv` 또는 `pydantic-settings` 도입하여 정리 권장. 본 스모크는 PowerShell 에서 `$env:CLAUDE_API_KEY` 수동 export 로 우회.
+  - **(기술 부채) Alembic migration 이 Postgres 전용 JSONB 사용 → SQLite 에서 `alembic upgrade head` 실패** — `dev_token.py` 가 `Base.metadata.create_all` 로 우회. S38 배포 시 migration 정리 또는 "Postgres-only" 확정 필요.
+  - **`/jobs/{job_id}/stream` SSE 도 이제 인증됨** — 기존 S19 `TestSSEEndpoint` 는 `get_current_user_id` 오버라이드 덕분에 회귀 없이 통과했으나, **프로덕션 mobile 이 SSE 를 구독할 때는 반드시 Authorization 헤더를 보내야 함**. 현재 S32 GenerationScreen 은 폴링 사용이라 영향 없음. 향후 SSE 전환 시 주의.
+  - **Phase 8 I1/I2 등재** — `docs/TASK_BACKLOG.md` 에 "Phase 8: 테스트 인프라" 섹션 신설. I1(mobile jest 복구) + I2(Detox/Maestro/Playwright 평가) 등재. S38 블로커 아님.
+  - **경고 `InsecureKeyLengthWarning`** — 테스트 실행 중 PyJWT 가 `JWT_SECRET_KEY` 의 길이가 23 bytes(기본값 "change-me-in-production")로 HMAC SHA256 권장(32 bytes)보다 짧다고 경고. 프로덕션 배포 시(S38) 환경변수로 32+ bytes 시크릿 설정 필수. 개발 환경에선 무해.
+  - **`dev_token.py` 수명** — S27b 세션 2(모바일) 완료 직후 삭제 권장. 목적(임시 수동 스모크 토큰 발급) 완수 + dev 백도어 성격이라 오래 두면 보안 위험.
+
+### 변경된 파일 목록
+**코드**:
+- `packages/backend/tests/test_s35b_frontend_contract_e2e.py` (신규, 약 870줄, 8 케이스)
+- `packages/backend/src/storytale/api/stories/router.py` (수정: `JobState.user_id` 필드 + `JobManager.create_job(user_id=...)` + `generate_story` user_id 주입 + `get_job_status`/`stream_job_events` 에 `CurrentUserDep` + 소유자 검증 404)
+- `packages/backend/scripts/dev_token.py` (신규, 약 120줄 — 실기기 수동 스모크용 임시 JWT 발급 스크립트. `Base.metadata.create_all` 로 테이블 부트스트랩 + dev 유저 find-or-create + 토큰 출력. S27b 완료 후 삭제 예정)
+- `packages/mobile/.env.local` (신규, 1줄 — `EXPO_PUBLIC_API_URL=http://172.20.10.10:8000/api/v1`. iOS 핫스팟 LAN IP. `.gitignore` 에 의해 git 추적 제외)
+
+**문서**:
+- `docs/TASK_BACKLOG.md` (S27 [완료] 에 미완 사항 주석 + S27b 신규 엔트리 + S35b 엔트리 상세화 + Phase 8 신설 + I1/I2 2개 태스크 등재)
+- `docs/S27b-handoff.md` (신규 — 다음 세션용 핸드오프 브리프. 배경/범위/설계 결정 7개/TDD 로드맵/세션 1·2 시작 프롬프트)
+- `docs/PROGRESS.md` (Phase 7 진행률 2/4 + Phase 8 추가 + 현재 위치/차단 갱신)
+- `docs/SESSION_LOG.md` (본 항목)
+
+**임시 수정 + 원복 (git 기록 없음)**:
+- `packages/mobile/src/api/client.ts` — 수동 스모크 중 9행에 JWT 하드코딩 주입 후, 스모크 완료 직후 `git checkout` 으로 원복. 커밋되지 않음.
+
+---
+
 ## S35a — 백엔드 통합 E2E (2026-04-11)
 
 ### 완료된 것
