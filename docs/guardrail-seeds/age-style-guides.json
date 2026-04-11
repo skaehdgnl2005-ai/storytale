@@ -1,0 +1,85 @@
+[
+  {
+    "age_group": "3-4",
+    "sentence_rules": {
+      "max_characters_per_sentence": 20,
+      "preferred_structure": "주어 + 동사 + 감각/감정. 단문 위주.",
+      "repetition_pattern": "AAB (같은 구조 2회 반복 후 변주)",
+      "vocabulary_level": "일상 단어 500개 이내. 의성어·의태어 적극 활용."
+    },
+    "emotional_expression": {
+      "method": "행동과 감각으로 표현. 감정을 직접 명명하지 않는다.",
+      "good_examples": [
+        "배가 꼬르륵 소리가 났어요.",
+        "손을 꼭 쥐었어요.",
+        "발을 동동 굴렀어요.",
+        "눈물이 뚝 떨어졌어요."
+      ],
+      "bad_examples": [
+        "하은이는 불안했어요.",
+        "슬픈 마음이 들었어요.",
+        "두려움을 느꼈어요."
+      ]
+    },
+    "page_guidelines": {
+      "sentences_per_page": {"min": 2, "max": 3},
+      "max_characters_per_page": 50,
+      "total_pages": {"min": 8, "max": 12}
+    }
+  },
+  {
+    "age_group": "5-6",
+    "sentence_rules": {
+      "max_characters_per_sentence": 30,
+      "preferred_structure": "단문 + 간단한 복문(~하니까, ~해서). 대화문 활용 가능.",
+      "repetition_pattern": "AAB 또는 AABB (반복 후 변주, 또는 대구)",
+      "vocabulary_level": "일상 단어 1000개. 간단한 형용사·부사 허용."
+    },
+    "emotional_expression": {
+      "method": "행동 묘사 70% + 간단한 감정 명명 30%. '마음이 ~했어요' 수준.",
+      "good_examples": [
+        "마음이 쿵쿵 뛰었어요.",
+        "기분이 살짝 좋아졌어요.",
+        "왠지 모르게 웃음이 났어요.",
+        "\"나도 할 수 있을까?\" 작은 소리로 말했어요."
+      ],
+      "bad_examples": [
+        "자존감이 떨어졌어요.",
+        "성취감을 느꼈어요.",
+        "복합적인 감정이었어요."
+      ]
+    },
+    "page_guidelines": {
+      "sentences_per_page": {"min": 3, "max": 4},
+      "max_characters_per_page": 80,
+      "total_pages": {"min": 10, "max": 14}
+    }
+  },
+  {
+    "age_group": "7-8",
+    "sentence_rules": {
+      "max_characters_per_sentence": 40,
+      "preferred_structure": "복문 허용. 인과관계(~때문에, ~덕분에) 사용. 내면 독백 가능.",
+      "repetition_pattern": "자유. 반복보다 서사 흐름 우선.",
+      "vocabulary_level": "초등 1~2학년 수준. 추상 개념(우정, 용기) 단어 허용."
+    },
+    "emotional_expression": {
+      "method": "행동 묘사 50% + 내면 서술 50%. 생각과 감정을 직접 표현 가능.",
+      "good_examples": [
+        "처음엔 화가 났는데, 생각해보니 서준이도 속상했을 것 같았어요.",
+        "용기를 낸다는 건, 무섭지 않은 게 아니라 무서워도 해보는 거래요.",
+        "하은이는 잠깐 고민했어요. 그리고 한 발짝 내디뎠어요."
+      ],
+      "bad_examples": [
+        "인지부조화를 경험했어요.",
+        "트라우마가 생겼어요.",
+        "메타인지적으로 생각했어요."
+      ]
+    },
+    "page_guidelines": {
+      "sentences_per_page": {"min": 4, "max": 5},
+      "max_characters_per_page": 120,
+      "total_pages": {"min": 12, "max": 16}
+    }
+  }
+]

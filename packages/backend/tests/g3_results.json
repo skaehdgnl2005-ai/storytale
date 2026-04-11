@@ -1,0 +1,170 @@
+{
+  "A": {
+    "name": "3-4se new_experience",
+    "age_group": "3-4",
+    "scenes": {
+      "1": {
+        "scene_id": "opening",
+        "page_number": 1,
+        "text": "엄마 품에 아기가 있어요.\n하은이는 토니를 꼭 안았어요.\n토니도 꼭 안아 줬어요.",
+        "illustration_prompt": "A young girl with short black hair, wearing a soft pastel outfit, sits beside her mother on a couch. The mother is gently cradling a baby in her arms, turned slightly away. The young girl hugs a small brown teddy bear tightly against her chest, her chin tucked down. Blue-gray muted pastel tones, soft diffused overcast light, quiet and still atmosphere. Simple interior background, a single window with pale light, minimal props — just the couch and teddy bear. Wide whitespace around the girl to express gentle loneliness. Low-angle view at child's eye level. Children's book illustration style, soft watercolor texture, warm but subdued."
+      },
+      "2": {
+        "scene_id": "transition",
+        "page_number": 2,
+        "text": "하은이가 토니 귀에 속삭였어요.\n\"토니야, 나 여기 있어.\"\n토니는 꼭 안겨 있었어요.",
+        "illustration_prompt": "A young girl with short black hair, wearing a soft pastel outfit, sitting alone near a rain-streaked window. She is whispering into the ear of a small brown teddy bear she holds close to her chest. Emotion: quiet loneliness, tender and still, muted blue-gray and dusty lavender tones, soft diffused overcast light filtering through the window. Environment: simple indoor setting, rain drops on window glass, a small cushion beside her, generous white space around the figure to evoke gentle solitude. Low angle view at child's eye level. Soft watercolor illustration style, children's book illustration."
+      },
+      "3": {
+        "scene_id": "turning_point",
+        "page_number": 3,
+        "text": "아기가 하은이를 봤어요.\n방긋, 웃었어요.\n하은이 눈이 동그래졌어요.",
+        "illustration_prompt": "A young girl with short black hair holds a small brown teddy bear, standing close to a baby lying on a soft blanket. The baby looks up at the girl and smiles warmly. The girl's eyes are wide open with surprise and wonder, mouth slightly open. Soft warm light glows from the side, creating a gentle, magical atmosphere. Simple indoor background with minimal props: a small blanket, the teddy bear. Wide negative space around the characters. Low-angle view at child's eye level. Soft pastel colors with warm yellow tones. Children's book illustration style, watercolor texture, gentle and tender mood."
+      },
+      "4": {
+        "scene_id": "attempt",
+        "page_number": 4,
+        "text": "하은이는 토니를 꼭 안았어요.\n조심조심, 한 발짝.\n토니를 내밀었어요.",
+        "illustration_prompt": "A young girl with short black hair, wearing a soft pastel outfit, carefully holding out a small brown teddy bear toward an unseen baby in front of her. She takes a small, cautious step forward, arms gently extended, chin slightly tucked. Warm amber and gold tones wash over the scene with golden hour lighting from the front, casting a gentle glow on her face and the teddy bear. Simple indoor background with soft warm light, minimal props: one teddy bear, a wooden floor. Open space in front of the girl to suggest forward movement. Low-angle perspective at child's eye level. 35% whitespace. Children's book illustration style, soft watercolor texture, gentle and warm."
+      },
+      "5": {
+        "scene_id": "retry",
+        "page_number": 5,
+        "text": "동생이 토니 발을 꼭 잡았어요.\n하은이 입이 씩 올라갔어요.\n토니는 우리 둘의 친구예요.",
+        "illustration_prompt": "A young girl with short black hair and round eyes, wearing a soft pastel outfit, sitting close to a smaller toddler sibling on a warm wooden floor. The young girl is smiling with a gentle giggle, watching the toddler hold the foot of a small brown teddy bear between them. Warm golden sunlight streams in softly from the side, casting a gentle glow. Simple cozy interior background with a small potted flower nearby. Bright warm tones, yellow-orange accents, plenty of soft whitespace. Low angle, child's eye level. Children's book illustration style, soft watercolor texture, gentle and heartwarming."
+      },
+      "6": {
+        "scene_id": "acceptance_a",
+        "page_number": 6,
+        "text": "하은이가 엄마 옆에 쏙 앉았어요.\n동생도 옆에 꼭 붙었어요.\n토니도 함께예요.",
+        "illustration_prompt": "A young girl with short black hair, wearing a soft pastel outfit, snuggling close to her mother on a cozy couch. A small toddler sibling nestles on the other side, and a well-loved teddy bear sits tucked between them all. Warm cream and peach tones fill the scene, with gentle indoor lamplight casting a golden glow. A fluffy blanket and soft cushions surround the family. Low angle view at child's eye level. Cozy, enveloping composition with minimal whitespace to feel warm and safe. Children's book illustration style, soft watercolor texture."
+      },
+      "7": {
+        "scene_id": "acceptance_b",
+        "page_number": 7,
+        "text": "하은이가 토니 귀에 속삭였어요.\n\"토니, 내일 또 놀자.\"\n동생이랑 같이.",
+        "illustration_prompt": "A young girl with short black hair, wearing cozy pajamas, lying in a soft bed and whispering gently into the ear of a small brown teddy bear she holds close. The scene feels warm and sleepy. Soft warm cream and peach tones fill the scene, with cozy lamplight glowing from the side. The bed has a fluffy blanket and a small pillow. Low angle view at the child's eye level. Simple background with generous negative space around the bed. Gentle, intimate mood. Children's book illustration style, soft watercolor texture, rounded shapes."
+      },
+      "8": {
+        "scene_id": "closing",
+        "page_number": 8,
+        "text": "하은이가 토니를 꼭 안았어요.\n달빛이 살며시 내려왔어요.\n토니가 옆에 있으니까 괜찮아.",
+        "illustration_prompt": "A young girl with short black hair, wearing soft pajamas, sleeping peacefully in a cozy bed, hugging a small brown teddy bear tightly in her arms. Warm cream and peach tones fill the scene. Gentle moonlight filters softly through a small window, casting a quiet, golden glow over the bed. A fluffy blanket is tucked around her, a small pillow nearby. Minimal props: teddy bear, blanket, moonlit window. Generous negative space above, intimate and snug composition. Low-angle view at child's eye level. Soft watercolor children's book illustration style, gentle and dreamy."
+      }
+    }
+  },
+  "B": {
+    "name": "5-6se joy_of_discovery",
+    "age_group": "5-6",
+    "scenes": {
+      "1": {
+        "scene_id": "curiosity",
+        "page_number": 1,
+        "text": "도서관 책꽂이에 아주 커다란 책이 있었어요.\n시우는 디노를 꼭 안고 책을 펼쳤어요.\n\"디노야, 이것 봐!\"\n트리케라톱스가 페이지 가득 나타났어요!",
+        "illustration_prompt": "A young boy with short black hair, around 6 years old, hugging a small dinosaur plush toy, sitting on the floor of a cozy library. He opens a large oversized picture book showing a vivid Triceratops illustration, his eyes wide with wonder and delight. Warm golden sunlight streams through a nearby window, casting a gentle glow. The scene features a tall bookshelf softly blurred in the background, a single glowing dust particle floating in the light, and the big open book as the main prop. Low-angle perspective at child's eye level. Soft warm yellow-orange palette, bright and airy with generous whitespace. Children's book illustration style, gentle watercolor texture, simple and warm."
+      },
+      "2": {
+        "scene_id": "exploration_1",
+        "page_number": 2,
+        "text": "시우는 디노를 꼭 안고 뒷마당으로 나갔어요.\n풀숲 사이에 돌멩이들이 가득했어요.\n\"디노야, 이것 봐! 공룡 알이다!\"\n시우는 돌멩이를 하나, 둘, 셋 주워 모았어요.",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, holding a small dinosaur plush toy tucked under his arm, crouching low in a sunny backyard garden. He is picking up smooth round pebbles from the ground with a wide joyful grin, imagining them as dinosaur eggs. Warm golden sunlight filters through the scene with a gentle lens flare. A small butterfly hovers nearby. Simple green grass background with soft yellow-orange accents, generous white space around the boy. Low angle view at child's eye level. Cozy children's book illustration style, watercolor texture, warm and cheerful palette."
+      },
+      "3": {
+        "scene_id": "exploration_2",
+        "page_number": 3,
+        "text": "모래사장에 발을 디디자, 시우 눈이 반짝였어요.\n\"디노야, 이것 봐! 여기는 공룡 땅이야!\"\n디노가 살짝 고개를 끄덕이는 것 같았어요.\n\"트리케라톱스가 저기 있대! 저기, 저기!\"\n시우는 마음이 쿵쿵 뛰었어요.",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, holding a small dinosaur plush toy, standing on a sandy beach with bare feet. The boy is pointing excitedly into the distance, mouth open in delight, as if spotting something amazing. Warm golden sunlight washes over the scene with a gentle lens flare. The sand stretches wide with generous whitespace, a single sparkling light particle trail and one small butterfly near the boy's hand. Low-angle perspective at child's eye level. Simple background, emotion-centered composition. Children's book illustration style, soft watercolor textures, warm yellow-orange accents."
+      },
+      "4": {
+        "scene_id": "challenge",
+        "page_number": 4,
+        "text": "그때 지아가 말했어요.\n\"공룡은 진짜가 아니야. 그냥 인형이잖아.\"\n시우는 디노를 꼭 껴안았어요.\n마음이 살짝 가라앉았어요.",
+        "illustration_prompt": "A young boy with short black hair, wearing a casual t-shirt and shorts, hugging a small dinosaur plush toy tightly to his chest. A girl his age stands nearby, looking at him with a matter-of-fact expression. The boy's eyes are cast slightly downward, his shoulders gently drooping. Scene set on a quiet sandy beach under a soft overcast sky. Muted cool pastels, blue-gray undertones, soft diffused light. Simple background with wide whitespace, a pale gray sky, and gentle sand. Three props only: dinosaur plush, small footprints in sand, distant gentle waves. Low angle, child's eye level. Children's book illustration style, warm yet melancholic, gentle linework."
+      },
+      "5": {
+        "scene_id": "discovery",
+        "page_number": 5,
+        "text": "시우는 책가방에서 책을 꺼냈어요.\n\"봐봐, 지아야! 이것 봐!\"\n트리케라톱스 뼈 사진이 있었어요.\n\"진짜 공룡이 살았던 거야!\"",
+        "illustration_prompt": "A young boy with short black hair, wearing a casual t-shirt and pants, holding open a large picture book showing a triceratops fossil skeleton. He points at the page with bright, excited eyes. A girl with pigtails leans in close, mouth open in surprise. Warm amber and golden tones fill the scene, with soft golden hour light glowing from the front. The background is simple and light, with generous whitespace around the children. A small dinosaur plush toy sits beside the boy. Low-angle view at child's eye level. Soft, warm illustration style, children's book illustration."
+      },
+      "6": {
+        "scene_id": "sharing_1",
+        "page_number": 6,
+        "text": "시우는 종이에 트리케라톱스를 그렸어요.\n뿔이 세 개, 방패 같은 머리!\n지아는 옆에서 프테라노돈을 그렸어요.\n\"디노야, 이것 봐! 우리 공룡 친구들이야!\"",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, sitting side by side with a girl friend at a low table, both drawing dinosaurs on white paper together. The boy is drawing a Triceratops with three horns, and the girl is drawing a Pteranodon with wide wings. Warm golden sunlight streams in softly from the side, casting a gentle glow over the children. A small dinosaur plush toy sits on the table nearby watching them. The background is simple and airy with a soft yellow-orange tone, a single small butterfly floats in the upper corner. Low angle, eye-level with the children. Cozy and joyful mood. Children's book illustration style, soft watercolor texture, warm palette, generous whitespace."
+      },
+      "7": {
+        "scene_id": "sharing_2",
+        "page_number": 7,
+        "text": "집에 오자마자 시우가 달려갔어요.\n\"엄마, 엄마! 이것 봐요!\"\n시우는 그림을 번쩍 들었어요.\n디노도 함께 들고서요.",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, wearing a casual t-shirt, holding up a crayon drawing proudly toward his mother. He is also clutching a small dinosaur plush toy in the same hand. His mother crouches down to his eye level with a warm smile. Warm golden sunlight streams through a window, casting a soft glow on both figures. The room is simple and cozy — a single potted plant and a small wooden table visible. Low-angle view at child's eye level. Bright warm palette with yellow-orange accents, gentle lens flare near the window. Soft whitespace around the characters. Children's book illustration style, watercolor texture, gentle lines."
+      },
+      "8": {
+        "scene_id": "closing",
+        "page_number": 8,
+        "text": "시우는 이불 속에 쏙 들어갔어요.\n디노를 꼭 안고서요.\n\"디노야, 내일은 뼈를 찾아볼까?\"\n마음이 따뜻하고 포근했어요.",
+        "illustration_prompt": "A young boy with short black hair, around 6 years old, lying snugly under a soft blanket in bed, holding a small dinosaur plush toy close to his chest. He is whispering to the toy with a gentle smile, eyes half-closed in sleepy contentment. Warm peach and cream tones fill the scene, with a soft glowing lamplight casting a cozy golden hue. Simple bedroom background with a fluffy pillow and a patterned blanket, minimal props. Low angle view at the child's eye level, generous negative space above to evoke a calm, dreamy night. Children's book illustration style, soft watercolor texture, warm and comforting mood."
+      }
+    }
+  },
+  "C": {
+    "name": "7-8se celebration",
+    "age_group": "7-8",
+    "scenes": {
+      "1": {
+        "scene_id": "anticipation_1",
+        "page_number": 1,
+        "text": "민준이는 달력 앞에 서서 손가락으로 날짜를 세었어요.\n\"하나, 둘, 셋… 딱 사흘 남았다!\"\n민준이는 로봇 장난감 보이를 꼭 안았어요.\n\"보이야, 이번 생일은 특별해. 무슨 선물이 올까?\"\n보이는 아무 말도 안 했지만, 민준이는 보이도 설레는 것 같았어요.",
+        "illustration_prompt": "A young boy with short black hair, wearing a cozy striped pajama top, stands on tiptoe in front of a large wall calendar, counting dates with his finger. He holds a small robot toy tucked under his arm. The scene feels warm and full of anticipation. Soft golden morning light streams through a nearby window, casting a gentle glow across the calendar and the boy's smiling face. The background is simple and uncluttered — just the calendar on a warm cream-colored wall, with a small potted plant nearby. Low-angle perspective at the child's eye level. Warm yellow-orange color palette with soft sunlight highlights. Cozy, joyful mood. Children's book illustration style, watercolor with soft ink lines, gentle textures, ample whitespace."
+      },
+      "2": {
+        "scene_id": "anticipation_2",
+        "page_number": 2,
+        "text": "민준이는 유진이에게 달려갔어요.\n\"유진아, 내 생일 파티에 꼭 와줘!\"\n\"강아지 모양 케이크도 같이 만들자!\"\n유진이가 눈을 반짝이며 고개를 끄덕였어요.\n보이야, 이번 생일은 특별해. 유진이도 함께니까!",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, wearing a casual t-shirt, excitedly grabbing his friend's hands — both children facing each other with big smiles, the boy's eyes sparkling with joy. Warm golden sunlight streams in from the side, casting a gentle glow on their faces. Simple indoor background with a small sketch or picture of a puppy-shaped cake visible between them, soft yellow-orange accents, one or two floating light particles in the air. Low angle view at children's eye level, generous whitespace around the figures. Illustration style, children's book illustration, warm and cheerful tone."
+      },
+      "3": {
+        "scene_id": "preparation",
+        "page_number": 3,
+        "text": "민준이는 엄마와 함께 반죽을 만들었어요.\n강아지 모양 틀로 꾹꾹 눌렀는데,\n반죽이 손에 찰싹 달라붙었어요.\n민준이와 엄마는 눈이 마주치자 그만 웃음이 터졌어요.\n보이야, 이번 생일은 특별해. 쿠키마저 웃기잖아!",
+        "illustration_prompt": "A young boy with short black hair and bright eyes stands at a kitchen counter beside his mother, both laughing joyfully as sticky cookie dough clings to the boy's small hands. The boy holds a dog-shaped cookie cutter, looking at his dough-covered fingers with delight. Warm golden sunlight streams through a nearby window, casting a soft glow over the scene. Simple kitchen background with a mixing bowl and a tray of dog-shaped cookie cutouts on the counter, generous white space around the figures. Low angle view at child's eye level. Warm yellow-orange palette, soft lens flare, cheerful and cozy atmosphere. Children's book illustration style, gentle watercolor texture."
+      },
+      "4": {
+        "scene_id": "unexpected",
+        "page_number": 4,
+        "text": "생일 아침, 눈을 떴더니 창밖에 빗소리가 들렸어요.\n투두둑, 투두둑.\n오늘은 밖에서 파티를 하기로 했는데.\n민준이는 이불 속에서 꼼짝도 하기 싫었어요.\n보이야, 비가 오면 어떡해.",
+        "illustration_prompt": "A young boy with short black hair, about 8 years old, sitting on his bed in pajamas, knees pulled up to his chest, looking sadly at a rain-streaked window. A small robot toy sits beside him on the bed. The mood is quiet and gloomy. Soft blue-gray light filters through the window, raindrops visible on the glass. The room is simple with minimal detail — just the bed, the window, and the boy. Wide whitespace around the figure to express loneliness. Low-angle view, eye-level with the child. Warm children's book illustration style, soft watercolor textures, muted cool pastels."
+      },
+      "5": {
+        "scene_id": "twist",
+        "page_number": 5,
+        "text": "민준이는 보이를 꼭 안고 눈을 감았어요.\n그러다 문득, 이런 생각이 들었어요.\n'비가 와도 파티는 할 수 있잖아!'\n민준이는 벌떡 일어났어요.\n보이를 들고 거실로 달려갔어요.",
+        "illustration_prompt": "A young boy with short black hair, around 8 years old, holding a small robot toy tightly in both hands, standing up from his bed with a determined and bright expression. Warm amber and golden light streams in from the side, casting a gentle glow on his face. The room is simple — a bed behind him and an open doorway ahead, symbolizing forward movement. Low angle shot, eye-level with the child. Soft whitespace in front of him suggests open possibility. Children's book illustration style, warm and encouraging tone."
+      },
+      "6": {
+        "scene_id": "together_1",
+        "page_number": 6,
+        "text": "딩동! 드디어 유진이가 왔어요.\n다른 친구들도 우르르 따라 들어왔어요.\n민준이는 함께 담요를 가져와 텐트를 만들었어요.\n보이도 텐트 안에 자리를 잡았어요.\n\"보이야, 이번 생일은 특별해!\" 민준이가 속삭였어요.",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, wearing a casual birthday outfit, sitting inside a cozy blanket fort in a living room with his friends around him. The boy holds a small robot toy, smiling warmly. Soft golden sunlight filters through the blanket walls, casting a warm yellow-orange glow inside the tent. The scene feels joyful and intimate — a few colorful blankets draped over chairs form the tent, with a small birthday banner visible nearby. Low angle view at child eye level. Simple background with gentle warm light particles floating in the air. Illustration style, children's book illustration, soft watercolor texture, generous whitespace around the fort."
+      },
+      "7": {
+        "scene_id": "together_2",
+        "page_number": 7,
+        "text": "민준이는 강아지 모양 쿠키를 꺼냈어요.\n유진이에게 하나, 친구들에게도 하나씩 나눠 줬어요.\n밖에선 빗소리가 톡톡, 투둑 울렸어요.\n꼭 음악 같아서 민준이는 기분이 좋아졌어요.\n\"보이야, 이번 생일은 특별해!\" 마음속으로 또 한 번 외쳤어요.",
+        "illustration_prompt": "A young boy with short black hair and bright eyes, wearing a cozy sweater, sitting inside a blanket fort with friends. The boy is smiling warmly, holding out a dog-shaped cookie to a friend beside him. Warm golden light glows inside the tent, with soft yellow-orange highlights. Raindrops visible on a small window in the background, creating a gentle, musical atmosphere. A small robot toy sits nearby. Simple background with light bokeh and a few soft light particles. Low-angle view, eye-level with the children. Cozy and joyful mood. Children's book illustration style, soft watercolor texture, generous whitespace."
+      },
+      "8": {
+        "scene_id": "gratitude_1",
+        "page_number": 8,
+        "text": "친구들이 돌아가고, 집이 조용해졌어요.\n민준이는 엄마 옆에 꼭 붙어 앉았어요.\n\"엄마, 비가 와서 더 좋았어.\"\n엄마가 빙긋 웃으며 민준이를 꼭 안아 줬어요.\n보이도 품 안에서 따뜻했어요.",
+        "illustration_prompt": "A young boy with short black hair, wearing a cozy sweater, sitting snuggled close beside his mother on a soft cushioned sofa. The boy holds a small robot toy in his lap. They are looking at each other warmly, the boy smiling softly after sharing something meaningful. Soft warm cream and peach tones fill the scene, with gentle indoor lamplight casting a cozy glow. Rain streaks faintly visible on a nearby window. Minimal background — a plush cushion, a small lamp, and the robot toy as the only props. Warm, intimate low-angle composition with snug, embracing whitespace. Illustration style, children's book illustration."
+      },
+      "9": {
+        "scene_id": "gratitude_2",
+        "page_number": 9,
+        "text": "민준이는 이불 속에 쏙 들어갔어요.\n보이를 꼭 안으니 마음이 포근해졌어요.\n오늘 하루가 머릿속에 하나씩 떠올랐어요.\n유진이의 웃음, 빗소리, 엄마의 따뜻한 품.\n민준이는 보이에게 살며시 속삭였어요.\n\"보이야, 오늘이 내 최고의 생일이야.\"",
+        "illustration_prompt": "A young boy with short black hair, wearing pajamas, lying snugly in bed hugging a small robot toy close. Warm cream and peach tones, cozy lamplight glow. Simple bedroom background, moonlight through window. Low angle, childrens book illustration style, watercolor texture."
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+FAIL __tests__/App.test.tsx
+  ??Test suite failed to run
+
+    Incorrect version of "react-test-renderer" detected. Expected "19.1.0", but found "19.2.0".
+
+    Fix it by running:
+    npm install -D react-test-renderer@19.1.0
+
+      1 | import React from "react";
+    > 2 | import { render, screen } from "@testing-library/react-native";
+        | ^
+      3 | import App from "../App";
+      4 |
+      5 | describe("App", () => {
+
+      at Object.ensurePeerDeps (../../node_modules/@testing-library/react-native/src/helpers/ensure-peer-deps.ts:36:3)
+      at Object.require (../../node_modules/@testing-library/react-native/src/index.ts:1:1)
+      at Object.require (__tests__/App.test.tsx:2:1)
+
+Test Suites: 1 failed, 1 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        0.815 s
+Ran all test suites.

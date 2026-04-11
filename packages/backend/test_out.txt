@@ -1,0 +1,166 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.2, pytest-8.4.2, pluggy-1.6.0 -- C:\Users\skaeh\Downloads\storytale-harness\packages\backend\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\skaeh\Downloads\storytale-harness\packages\backend
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-0.26.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 5 items
+
+tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6241_\uac00\uce58\uad50\uc721_3-4\uc138] 
+==================================================
+[시나리오1_가치교육_3-4세] 시작
+==================================================
+Parent Text: 거짓말하면 안 된다는 걸 알려주고 싶어요. 요즘 간식 먹었냐고 물으면 자꾸 안 먹었다고 해요.
+
+[ERROR] Exception Occurred: LLMClientError - Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv1Vn2JczvJwN9Q44NQ'}
+FAILED
+tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6242_\uad00\uc2ec\uc0ac_5-6\uc138] 
+==================================================
+[시나리오2_관심사_5-6세] 시작
+==================================================
+Parent Text: 공룡을 너무 좋아해요, 특히 트리케라톱스요. 공룡 나오는 이야기 만들어주세요.
+
+[ERROR] Exception Occurred: LLMClientError - Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv25K9Aqn94rf1xtYJe'}
+FAILED
+tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6243_\ubb38\uc81c\ud574\uacb0_7-8\uc138] 
+==================================================
+[시나리오3_문제해결_7-8세] 시작
+==================================================
+Parent Text: 동생이 태어났는데 자꾸 동생을 밀치고 장난감을 빼앗아요. 질투가 심한 것 같아요.
+
+[ERROR] Exception Occurred: LLMClientError - Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv2bVqoroRAyxqHseco'}
+FAILED
+tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6244_\uae30\ub150\uc77c_3-4\uc138] 
+==================================================
+[시나리오4_기념일_3-4세] 시작
+==================================================
+Parent Text: 다음 주가 생일인데 특별한 책을 만들어주고 싶어요. 요즘 곰 인형 토니를 매일 안고 자요.
+
+[ERROR] Exception Occurred: LLMClientError - Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv3BQXmX2GwxjtzQufc'}
+FAILED
+tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6245_\uc548\uc804\uacbd\uacc4_5-6\uc138] 
+==================================================
+[시나리오5_안전경계_5-6세] 시작
+==================================================
+Parent Text: 좋은 아이가 됐으면 좋겠어요. 말 안 들을 때 어떻게 해야 하는지 알려주는 이야기요.
+
+[ERROR] Exception Occurred: LLMClientError - Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv4SwCmn4Maq4NURyDe'}
+예외 처리가 정상이면 이 시나리오는 합격일 수 있습니다.
+PASSED
+
+================================== FAILURES ===================================
+_ test_g2_scenario[\uc2dc\ub098\ub9ac\uc6241_\uac00\uce58\uad50\uc721_3-4\uc138] _
+src\storytale\interpreter\llm_client.py:96: in complete
+    response = await self._client.messages.create(
+.venv\Lib\site-packages\anthropic\resources\messages\messages.py:2443: in create
+    return await self._post(
+.venv\Lib\site-packages\anthropic\_base_client.py:1996: in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\anthropic\_base_client.py:1781: in request
+    raise self._make_status_error_from_response(err.response) from None
+E   anthropic._exceptions.OverloadedError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv1Vn2JczvJwN9Q44NQ'}
+
+The above exception was the direct cause of the following exception:
+tests\quality_gates\test_g2_interpreter.py:135: in test_g2_scenario
+    raise e
+tests\quality_gates\test_g2_interpreter.py:103: in test_g2_scenario
+    plan = await orchestrator.interpret_and_plan(
+src\storytale\interpreter\interpreter_orchestrator.py:121: in interpret_and_plan
+    intent = await self._analyzer.analyze(parent_text, purpose_category, child_age)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\storytale\interpreter\intent_analyzer.py:167: in analyze
+    raw: dict[str, Any] = await self._client.complete_json(
+src\storytale\interpreter\llm_client.py:160: in complete_json
+    raw = await self.complete(
+src\storytale\interpreter\llm_client.py:132: in complete
+    raise LLMClientError(
+E   storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv1Vn2JczvJwN9Q44NQ'}
+__ test_g2_scenario[\uc2dc\ub098\ub9ac\uc6242_\uad00\uc2ec\uc0ac_5-6\uc138] ___
+src\storytale\interpreter\llm_client.py:96: in complete
+    response = await self._client.messages.create(
+.venv\Lib\site-packages\anthropic\resources\messages\messages.py:2443: in create
+    return await self._post(
+.venv\Lib\site-packages\anthropic\_base_client.py:1996: in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\anthropic\_base_client.py:1781: in request
+    raise self._make_status_error_from_response(err.response) from None
+E   anthropic._exceptions.OverloadedError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv25K9Aqn94rf1xtYJe'}
+
+The above exception was the direct cause of the following exception:
+tests\quality_gates\test_g2_interpreter.py:135: in test_g2_scenario
+    raise e
+tests\quality_gates\test_g2_interpreter.py:103: in test_g2_scenario
+    plan = await orchestrator.interpret_and_plan(
+src\storytale\interpreter\interpreter_orchestrator.py:121: in interpret_and_plan
+    intent = await self._analyzer.analyze(parent_text, purpose_category, child_age)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\storytale\interpreter\intent_analyzer.py:167: in analyze
+    raw: dict[str, Any] = await self._client.complete_json(
+src\storytale\interpreter\llm_client.py:160: in complete_json
+    raw = await self.complete(
+src\storytale\interpreter\llm_client.py:132: in complete
+    raise LLMClientError(
+E   storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv25K9Aqn94rf1xtYJe'}
+_ test_g2_scenario[\uc2dc\ub098\ub9ac\uc6243_\ubb38\uc81c\ud574\uacb0_7-8\uc138] _
+src\storytale\interpreter\llm_client.py:96: in complete
+    response = await self._client.messages.create(
+.venv\Lib\site-packages\anthropic\resources\messages\messages.py:2443: in create
+    return await self._post(
+.venv\Lib\site-packages\anthropic\_base_client.py:1996: in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\anthropic\_base_client.py:1781: in request
+    raise self._make_status_error_from_response(err.response) from None
+E   anthropic._exceptions.OverloadedError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv2bVqoroRAyxqHseco'}
+
+The above exception was the direct cause of the following exception:
+tests\quality_gates\test_g2_interpreter.py:135: in test_g2_scenario
+    raise e
+tests\quality_gates\test_g2_interpreter.py:103: in test_g2_scenario
+    plan = await orchestrator.interpret_and_plan(
+src\storytale\interpreter\interpreter_orchestrator.py:121: in interpret_and_plan
+    intent = await self._analyzer.analyze(parent_text, purpose_category, child_age)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\storytale\interpreter\intent_analyzer.py:167: in analyze
+    raw: dict[str, Any] = await self._client.complete_json(
+src\storytale\interpreter\llm_client.py:160: in complete_json
+    raw = await self.complete(
+src\storytale\interpreter\llm_client.py:132: in complete
+    raise LLMClientError(
+E   storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv2bVqoroRAyxqHseco'}
+__ test_g2_scenario[\uc2dc\ub098\ub9ac\uc6244_\uae30\ub150\uc77c_3-4\uc138] ___
+src\storytale\interpreter\llm_client.py:96: in complete
+    response = await self._client.messages.create(
+.venv\Lib\site-packages\anthropic\resources\messages\messages.py:2443: in create
+    return await self._post(
+.venv\Lib\site-packages\anthropic\_base_client.py:1996: in post
+    return await self.request(cast_to, opts, stream=stream, stream_cls=stream_cls)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\anthropic\_base_client.py:1781: in request
+    raise self._make_status_error_from_response(err.response) from None
+E   anthropic._exceptions.OverloadedError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv3BQXmX2GwxjtzQufc'}
+
+The above exception was the direct cause of the following exception:
+tests\quality_gates\test_g2_interpreter.py:135: in test_g2_scenario
+    raise e
+tests\quality_gates\test_g2_interpreter.py:103: in test_g2_scenario
+    plan = await orchestrator.interpret_and_plan(
+src\storytale\interpreter\interpreter_orchestrator.py:121: in interpret_and_plan
+    intent = await self._analyzer.analyze(parent_text, purpose_category, child_age)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src\storytale\interpreter\intent_analyzer.py:167: in analyze
+    raw: dict[str, Any] = await self._client.complete_json(
+src\storytale\interpreter\llm_client.py:160: in complete_json
+    raw = await self.complete(
+src\storytale\interpreter\llm_client.py:132: in complete
+    raise LLMClientError(
+E   storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv3BQXmX2GwxjtzQufc'}
+=========================== short test summary info ===========================
+FAILED tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6241_\uac00\uce58\uad50\uc721_3-4\uc138] - storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv1Vn2JczvJwN9Q44NQ'}
+FAILED tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6242_\uad00\uc2ec\uc0ac_5-6\uc138] - storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv25K9Aqn94rf1xtYJe'}
+FAILED tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6243_\ubb38\uc81c\ud574\uacb0_7-8\uc138] - storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv2bVqoroRAyxqHseco'}
+FAILED tests/quality_gates/test_g2_interpreter.py::test_g2_scenario[\uc2dc\ub098\ub9ac\uc6244_\uae30\ub150\uc77c_3-4\uc138] - storytale.interpreter.llm_client.LLMClientError: Error code: 529 - {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'Overloaded'}, 'request_id': 'req_011CZqv3BQXmX2GwxjtzQufc'}
+======================== 4 failed, 1 passed in 51.83s =========================

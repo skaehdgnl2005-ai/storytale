@@ -1,0 +1,133 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-04-07",
+  "description": "AI 일러스트 생성 파이프라인의 시각적 통일성을 위한 아트 디렉션 가드레일. story-personalizer 프롬프트에서 {{art_direction}}으로 참조됨.",
+
+  "style_definitions": {
+    "watercolor": {
+      "description": "따뜻한 수채화 느낌. 물감이 번지는 질감과 종이 텍스처가 느껴지는 스타일.",
+      "positive_modifiers": [
+        "soft watercolor wash", "wet-on-wet blending",
+        "visible paper texture", "warm pastel tones",
+        "gentle color bleeding at edges", "hand-painted feel",
+        "light pencil sketch undertone"
+      ],
+      "negative_modifiers": [
+        "sharp edges", "dark outlines", "photorealistic",
+        "oversaturated colors", "complex patterns",
+        "digital render feel", "cell shading", "anime style"
+      ],
+      "color_notes": "채도를 낮추고 명도를 높인 웜톤 파스텔. 흰 여백이 많을수록 좋음."
+    },
+    "pastel_crayon": {
+      "description": "크레파스/색연필 질감. 아이가 직접 그린 듯한 따뜻하고 소박한 느낌.",
+      "positive_modifiers": [
+        "crayon texture", "colored pencil strokes",
+        "visible stroke marks", "soft grainy texture",
+        "slightly uneven coloring", "warm muted palette",
+        "hand-drawn quality"
+      ],
+      "negative_modifiers": [
+        "smooth gradients", "photorealistic", "sharp vector lines",
+        "glossy finish", "metallic colors",
+        "complex shading", "3D rendering"
+      ],
+      "color_notes": "크레파스 특유의 불균일한 채색. 색이 겹치는 부분에서 자연스러운 혼합."
+    },
+    "clean_digital": {
+      "description": "깔끔한 디지털 일러스트. 현대적이면서도 따뜻한 느낌의 플랫 스타일.",
+      "positive_modifiers": [
+        "clean digital illustration", "flat design with subtle depth",
+        "smooth color fills", "soft rounded shapes",
+        "gentle ambient lighting", "modern storybook style",
+        "minimal clean lines"
+      ],
+      "negative_modifiers": [
+        "photorealistic", "heavy textures", "grunge",
+        "complex shadows", "sharp angular shapes",
+        "neon colors", "3D rendering", "anime style"
+      ],
+      "color_notes": "깨끗한 파스텔 팔레트. 색 경계가 부드럽되 수채화처럼 번지지는 않음."
+    }
+  },
+
+  "composition_rules": {
+    "whitespace_ratio": "화면의 30~50%는 여백으로 유지. 여백이 많을수록 아이의 감정이 돋보인다.",
+    "max_props_per_scene": 3,
+    "character_focus": "주인공이 화면의 40~60%를 차지. 캐릭터가 가장 먼저 눈에 들어와야 한다.",
+    "background_complexity": "배경 요소는 2~3개 이하. 단순하고 추상적일수록 좋다.",
+    "perspective": "아이 눈높이(로우 앵글). 위에서 내려다보는 구도 금지. 아이와 동등한 시선.",
+    "framing": "캐릭터를 프레임 중앙 또는 1/3 지점에 배치. 극단적 클로즈업/롱샷 지양.",
+    "depth_of_field": "전경-중경-후경 중 2개 레이어만 사용. 복잡한 다층 구성 금지."
+  },
+
+  "character_rendering_rules": {
+    "proportions": "머리:몸 비율 1:2~1:3 (실제보다 머리가 큰 아동 일러스트 비율). 일관되게 유지.",
+    "facial_expression": "감정은 눈과 입으로만 표현. 과장된 이모티콘식 표현 금지. 자연스럽고 미묘하게.",
+    "body_language": "감정을 보조하는 몸짓. 기쁨→팔 벌림, 슬픔→움츠림, 용기→한 발짝 내딛기.",
+    "consistency_anchor": "의상, 헤어스타일, 악세서리는 전 장면에서 동일하게 유지. Identity Prompt Block 참조.",
+    "secondary_characters": "보조 캐릭터(동물, 친구)는 주인공보다 단순하게 묘사. 주인공 시각적 우위 유지."
+  },
+
+  "emotion_to_visual": {
+    "joy": {
+      "palette_shift": "warm golden highlights, soft yellow-orange accents",
+      "lighting": "bright warm sunlight, gentle lens flare",
+      "whitespace": "적당한 여백. 활기차되 복잡하지 않게.",
+      "background_hint": "꽃, 나비, 반짝이는 빛 입자 등 긍정적 요소 1~2개"
+    },
+    "sadness": {
+      "palette_shift": "blue-gray undertones, muted cool pastels",
+      "lighting": "soft diffused light, slightly dim, overcast feel",
+      "whitespace": "많은 여백. 고립감이나 쓸쓸함을 공간으로 표현.",
+      "background_hint": "비 오는 창가, 빈 벤치 등 고요한 요소. 어둡지는 않게."
+    },
+    "fear": {
+      "palette_shift": "muted cool tones, desaturated. NOT dark or scary",
+      "lighting": "soft ambient light, gentle shadows only. 공포스러운 조명 절대 금지.",
+      "whitespace": "캐릭터 주변 넓은 여백으로 불안감 표현. 빈 공간이 많은 구도.",
+      "background_hint": "살짝 흐릿한 배경. 위협적 요소 없이 낯설음만 표현."
+    },
+    "anger": {
+      "palette_shift": "warm reds softened to coral-pink. 공격적인 빨간색 금지.",
+      "lighting": "warm but slightly intense. 극적 조명 금지.",
+      "whitespace": "보통 수준. 에너지가 느껴지되 혼란스럽지 않게.",
+      "background_hint": "바람에 날리는 나뭇잎 등 동적 요소. 파괴적 이미지 금지."
+    },
+    "courage": {
+      "palette_shift": "warm amber and gold tones, subtle glow",
+      "lighting": "golden hour lighting, warm directional light from front",
+      "whitespace": "중간. 캐릭터 앞에 열린 공간을 두어 '나아감'을 암시.",
+      "background_hint": "길, 문, 언덕 등 '앞으로 나아가는' 상징적 요소"
+    },
+    "comfort": {
+      "palette_shift": "soft warm cream and peach tones",
+      "lighting": "warm indoor lighting, cozy lamplight feel",
+      "whitespace": "적은 여백. 포근하고 아늑한 감싸는 느낌.",
+      "background_hint": "이불, 쿠션, 위안 물건 등 안정감을 주는 소품"
+    }
+  },
+
+  "absolute_prohibitions": [
+    "무섭거나 위협적인 표정 (사람, 동물 모두)",
+    "날카로운 물체, 무기, 뾰족한 형태",
+    "어두운 그림자, 공포스러운 분위기, 밤의 어둠",
+    "실제 사진 같은 리얼리즘 (포토리얼리스틱)",
+    "성인이 아이보다 위압적으로 큰 구도",
+    "아이가 혼자서 밤에 밖에 있는 장면",
+    "피, 상처, 신체적 고통을 암시하는 요소",
+    "복잡하고 혼란스러운 배경 (요소 4개 이상)"
+  ],
+
+  "prompt_template_order": {
+    "description": "일러스트 프롬프트는 반드시 아래 순서로 구성한다. story-personalizer가 이 순서를 따라야 함.",
+    "order": [
+      "1. Identity Block — 캐릭터 시트에서 자동 주입되는 고정 외형 묘사 (수정 금지)",
+      "2. Action Block — [주체]가 [행동]하는 장면",
+      "3. Emotion Block — 감정/분위기 (emotion_to_visual 참조)",
+      "4. Environment Block — 배경, 소품 (composition_rules 준수, max_props 3)",
+      "5. Style Block — {{illustration_style}} style, children's book illustration"
+    ],
+    "example": "a young girl with round face, short black hair with red hairpin, wearing yellow sweater with star pattern, rosy cheeks, big brown eyes, hugging a brown teddy bear tightly, soft warm cream tones, cozy indoor lamplight, simple bedroom with one window and a blanket, lots of white space around character, soft watercolor wash, visible paper texture, warm pastel tones, children's book illustration"
+  }
+}

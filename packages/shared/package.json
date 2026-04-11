@@ -1,0 +1,16 @@
+{
+  "name": "@storytale/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StoryTale 공유 타입 정의",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

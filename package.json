@@ -1,0 +1,19 @@
+{
+  "name": "storytale",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StoryTale — 개인화 아동 그림책 생성 앱 모노레포",
+  "workspaces": [
+    "packages/shared",
+    "packages/mobile",
+    "packages/admin-web"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,58 @@
+[project]
+name = "storytale"
+version = "0.1.0"
+description = "StoryTale — 개인화 아동 그림책 생성 백엔드"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.34,<1",
+    "sqlalchemy>=2.0,<3",
+    "alembic>=1.14,<2",
+    "asyncpg>=0.30,<1",
+    "pydantic>=2.0,<3",
+    "pydantic-settings>=2.0,<3",
+    "httpx>=0.28,<1",
+    "redis>=5.0,<6",
+    "python-dotenv>=1.0,<2",
+    "PyJWT>=2.8,<3",
+    "PyYAML>=6.0,<7",
+    "anthropic>=0.40,<1",
+    "google-genai>=1.0,<2",
+    "boto3>=1.35,<2",
+    "Pillow>=10.0,<12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.25,<1",
+    "aiosqlite>=0.20,<1",
+    "ruff>=0.9,<1",
+    "mypy>=1.14,<2",
+]
+
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+markers = [
+    "integration: 실제 외부 API 호출 테스트 (--run-integration 플래그 필요)",
+]

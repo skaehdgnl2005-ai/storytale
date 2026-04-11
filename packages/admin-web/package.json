@@ -1,0 +1,11 @@
+{
+  "name": "@storytale/admin-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StoryTale 가드레일 관리 어드민 웹",
+  "scripts": {
+    "test": "echo \"S36에서 어드민 웹 구현 예정\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
