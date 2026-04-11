@@ -269,6 +269,56 @@ class AuthService:
             await self.db.refresh(user)
         return user
 
+    # =======================================================================
+    # S27b 이메일+비밀번호 로그인
+    # =======================================================================
+
+    async def register_with_email(self, email: str, password: str) -> AuthTokens:
+        """이메일+비번 회원가입 → JWT 발급.
+
+        Args:
+            email: 사용자 이메일. 호출자는 이미 Pydantic EmailStr 로 검증된
+                   값을 넘기지만, 이 메서드 내부에서 .lower() 로 추가 정규화.
+            password: 평문 비번. Pydantic 에서 8자 이상 + 72바이트 이하 검증됨.
+
+        Raises:
+            EmailAlreadyExistsError: 같은 이메일로 이미 가입된 사용자 존재.
+
+        Returns:
+            AuthTokens: access + refresh 쌍.
+        """
+        # EmailStr 은 도메인만 자동 정규화. 로컬파트까지 통일하여
+        # "User@example.com" ≠ "user@example.com" 같은 중복 가입을 방지.
+        normalized_email = email.lower()
+
+        # 선확인: 이미 존재하면 즉시 409
+        existing = await self._find_user_by_email(normalized_email)
+        if existing is not None:
+            raise EmailAlreadyExistsError()
+
+        # INSERT 시도
+        try:
+            user = User(
+                id=uuid.uuid4(),
+                email=normalized_email,
+                provider=EMAIL_PROVIDER,
+                password_hash=_hash_password(password),
+            )
+            self.db.add(user)
+            await self.db.commit()
+            await self.db.refresh(user)
+        except IntegrityError as e:
+            await self.db.rollback()
+            # 교과서적 race condition 해결: rollback 후 재확인으로 IntegrityError
+            # 의 실제 원인이 "이메일 중복" 인지 검증. 다른 원인(NOT NULL/FK/
+            # Check) 이면 그대로 500 으로 전파하여 디버깅 단서 보존.
+            existing = await self._find_user_by_email(normalized_email)
+            if existing is not None:
+                raise EmailAlreadyExistsError() from e
+            raise
+
+        return self._issue_tokens(str(user.id))
+
     def _issue_tokens(self, user_id: str) -> AuthTokens:
         """액세스 + 리프레시 토큰 쌍 발급."""
         return AuthTokens(
