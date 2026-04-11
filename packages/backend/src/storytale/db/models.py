@@ -30,6 +30,8 @@ class User(Base):
     provider = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     consent_given_at = Column(DateTime(timezone=True), nullable=True)
+    # S27b: 이메일+비번 로그인용 bcrypt 해시. 소셜 유저는 null 유지.
+    password_hash = Column(String, nullable=True)
 
     profiles = relationship("ChildProfile", back_populates="user")
     stories = relationship("Story", back_populates="user")
