@@ -158,7 +158,7 @@ class TestRegisterEmail:
 
     @pytest.mark.asyncio
     async def test_register_overlong_password_returns_422(self, client):
-        # 한글 25자 = UTF-8 75바이트 (3바이트 × 25). bcrypt 72바이트 한도 초과
+        # 한글 25자 = UTF-8 75바이트 (3바이트 * 25). bcrypt 72바이트 한도 초과
         long_password = "가" * 25
         assert len(long_password.encode("utf-8")) == 75
         resp = await client.post(
@@ -206,9 +206,7 @@ class TestLoginEmail:
         assert "expires_in" in data
 
     @pytest.mark.asyncio
-    async def test_login_with_wrong_password_returns_401(
-        self, client, registered_user
-    ):
+    async def test_login_with_wrong_password_returns_401(self, client, registered_user):
         resp = await client.post(
             "/auth/login/email",
             json={

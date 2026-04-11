@@ -78,7 +78,8 @@ class EmailRegisterRequest(BaseModel):
     def _password_bytes_within_bcrypt_limit(cls, v: str) -> str:
         if len(v.encode("utf-8")) > MAX_PASSWORD_BYTES:
             raise ValueError(
-                f"password must be at most {MAX_PASSWORD_BYTES} bytes when UTF-8 encoded"
+                f"password must be at most {MAX_PASSWORD_BYTES} bytes "
+                "when UTF-8 encoded"
             )
         return v
 

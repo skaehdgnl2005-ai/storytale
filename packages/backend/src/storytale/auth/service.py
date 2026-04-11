@@ -130,7 +130,7 @@ def _get_dummy_hash() -> str:
     """Constant-time login 용 dummy hash. 프로세스 lifetime 내 1회만 계산.
 
     공격자가 존재하지 않는 이메일로 로그인 스팸할 때 매 요청마다 bcrypt.hashpw
-    를 실행하면 prod 라운드 12 기준 ~250ms × 요청 수로 CPU 가 포화된다. 캐시로
+    를 실행하면 prod 라운드 12 기준 ~250ms * 요청 수로 CPU 가 포화된다. 캐시로
     첫 로그인 시점에 1회만 계산 후 프로세스 종료까지 고정.
 
     BCRYPT_ROUNDS 런타임 변경 시 서버 재시작 필요(허용 가능한 제약).
@@ -337,9 +337,7 @@ class AuthService:
         # constant-time: user 가 없거나 password_hash 가 NULL 이면 dummy hash
         # 로 대체. bcrypt 타이밍이 모든 케이스에서 균일해짐.
         stored_hash = (
-            user.password_hash
-            if (user and user.password_hash)
-            else _get_dummy_hash()
+            user.password_hash if (user and user.password_hash) else _get_dummy_hash()
         )
         is_valid = _verify_password(password, stored_hash)
 
