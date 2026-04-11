@@ -13,12 +13,20 @@ import json
 import json as json_mod
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
@@ -30,13 +38,23 @@ from storytale.api.dependencies import get_db
 from storytale.db.models import ChildProfile as ChildProfileModel
 from storytale.db.models import Story as StoryModel
 from storytale.db.models import StoryPage as StoryPageModel
+from storytale.illustration.character_sheet_service import CharacterSheet
+from storytale.illustration.illustration_orchestrator import (
+    IllustrationOrchestrator,
+    OrchestratedIllustration,
+)
 from storytale.interpreter.intent_analyzer import IntentAnalyzer, RejectedIntentError
+from storytale.interpreter.interpreter_orchestrator import MAX_REVISIONS
 from storytale.interpreter.llm_client import create_llm_client
 from storytale.interpreter.plan_reviser import PlanReviser
 from storytale.interpreter.preview_generator import PreviewGenerator, StoryPreview
 from storytale.interpreter.scene_planner import ScenePlan, ScenePlanner
 from storytale.interpreter.story_orchestrator import StoryOrchestrator
-from storytale.interpreter.story_personalizer import ChildProfile, StoryPersonalizer
+from storytale.interpreter.story_personalizer import (
+    ChildProfile,
+    PersonalizedScene,
+    StoryPersonalizer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +157,48 @@ class PlanStoryResponse(BaseModel):
 
     plan: ScenePlan
     preview: StoryPreview
+
+
+# S31a — 부모 피드백으로 ScenePlan을 수정하는 엔드포인트(Phase C 노출).
+# 모바일 미리보기/수정 화면(S31)이 호출한다.
+#
+# revision_count 추적은 라우터 레벨에서 검증한다.
+# `InterpreterOrchestrator._revision_count`는 매 요청마다 새 인스턴스가
+# 생성되므로(`get_story_orchestrator` 의존성) 인스턴스 상태로는 누적이 불가능하다.
+# MVP 범위에서는 클라이언트가 `revision_count`(이미 적용된 횟수, 0-based)를
+# 보내고 서버가 `< MAX_REVISIONS`를 검증하는 stateless 패턴을 사용한다.
+# Redis 기반 잡 상태 도입은 Phase 7에서 재검토.
+
+
+class PlanRevisionRequest(BaseModel):
+    """ScenePlan 수정 요청.
+
+    Fields:
+        current_plan: 수정 직전의 ScenePlan(클라이언트가 보유 중인 상태).
+        feedback: 부모의 자유 서술 피드백(최대 500자, security.md).
+        revision_count: 이번 호출 이전까지 이미 적용된 수정 횟수(0-based).
+            서버는 `revision_count < MAX_REVISIONS` 일 때만 처리한다.
+        child_id: 소유자 검증 + 미리보기 child_name 추출용.
+    """
+
+    current_plan: ScenePlan
+    feedback: str = Field(
+        min_length=1,
+        max_length=PARENT_TEXT_MAX_LENGTH,
+    )
+    revision_count: int = Field(ge=0)
+    child_id: str
+
+
+class PlanRevisionResponse(BaseModel):
+    """수정된 ScenePlan + 새 미리보기 + 갱신된 revision_count.
+
+    클라이언트는 응답의 `revision_count`를 다음 revise 호출에 그대로 전달한다.
+    """
+
+    plan: ScenePlan
+    preview: StoryPreview
+    revision_count: int
 
 
 class GenerateStoryResponse(BaseModel):
@@ -309,8 +369,45 @@ async def get_session_factory() -> async_sessionmaker:
     return AsyncSessionLocal
 
 
+# S35a — 텍스트/일러스트 파이프라인 통합 지점.
+#
+# 호출 시그니처: (ChildProfile, style: str) → (IllustrationOrchestrator,
+#                                              CharacterSheet) | None
+#
+# 왜 이 형태인가:
+#   - 일러스트 파이프라인(S26)은 준비된 CharacterSheet 을 받아야 한다.
+#   - CharacterSheet 은 child 마다 다르므로 요청 시점에 해석되어야 한다.
+#   - S22a(사진→얼굴 앵커) / S22b(얼굴 앵커→멀티뷰 시트) 파이프라인은 아직
+#     프로덕션 플로우에 연결되지 않아 `None` 반환이 기본값(텍스트-only).
+#   - 테스트는 이 의존성을 오버라이드하여 가짜 오케스트레이터 + 시트 주입.
+IllustrationContextProvider = Callable[
+    [ChildProfile, str],
+    Awaitable[tuple[IllustrationOrchestrator, CharacterSheet] | None],
+]
+
+
+async def get_illustration_context_provider() -> IllustrationContextProvider | None:
+    """일러스트 파이프라인 컨텍스트 제공자 의존성 (S35a).
+
+    반환값:
+        IllustrationContextProvider: (child, style) 을 받아 오케스트레이터 +
+            캐릭터 시트 튜플 혹은 None 을 반환하는 async callable.
+        None: 일러스트 파이프라인 비활성 — 텍스트-only 모드.
+
+    MVP: 기본 None. S22a/S22b 캐릭터 시트 준비 플로우가 프로덕션에 연결되면
+         실제 구현을 여기에 넣는다(예: photo_hash 기반 캐시 조회 + fallback).
+    테스트: `app.dependency_overrides[get_illustration_context_provider]` 로
+           가짜 provider 주입.
+    """
+    return None
+
+
 OrchestratorDep = Annotated[StoryOrchestrator, Depends(get_story_orchestrator)]
 SessionFactoryDep = Annotated[async_sessionmaker, Depends(get_session_factory)]
+IllustrationContextDep = Annotated[
+    IllustrationContextProvider | None,
+    Depends(get_illustration_context_provider),
+]
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
@@ -326,9 +423,22 @@ async def _save_story_to_db(
     confirmed_plan: ScenePlan,
     style: str,
     scenes: list[dict[str, Any]],
+    story_id: uuid.UUID | None = None,
+    illustrations: dict[str, OrchestratedIllustration] | None = None,
 ) -> str:
-    """생성 완료된 스토리를 Story + StoryPage DB에 저장한다."""
-    story_id = uuid.uuid4()
+    """생성 완료된 스토리를 Story + StoryPage DB에 저장한다.
+
+    Args:
+        story_id: 저장할 스토리 ID. None 이면 새로 생성.
+            S35a 에서 일러스트 파이프라인과 같은 ID 를 공유해야 S3 키
+            (`stories/{story_id}/scenes/{scene_id}.png`) 와 DB 가 일치한다.
+        illustrations: scene_id → OrchestratedIllustration 매핑.
+            있으면 해당 장면 StoryPage 에 illustration_url + consistency_score
+            를 저장한다. None 이면 텍스트-only 저장(S19/S20 하위 호환).
+    """
+    if story_id is None:
+        story_id = uuid.uuid4()
+    illus_map = illustrations or {}
 
     async with session_factory() as session:
         story = StoryModel(
@@ -342,12 +452,17 @@ async def _save_story_to_db(
         session.add(story)
 
         for scene_data in scenes:
+            illus = illus_map.get(scene_data["scene_id"])
             page = StoryPageModel(
                 story_id=story_id,
                 page_number=scene_data["page_number"],
                 scene_id=scene_data["scene_id"],
                 text=scene_data["text"],
                 illustration_prompt=scene_data["illustration_prompt"],
+                illustration_url=illus.image_url if illus else None,
+                consistency_score=(
+                    illus.consistency_score.composite_score if illus else None
+                ),
             )
             session.add(page)
 
@@ -370,9 +485,24 @@ async def _run_generation(
     user_id: str | None = None,
     child_id: str | None = None,
     session_factory: async_sessionmaker | None = None,
+    illustration_orchestrator: IllustrationOrchestrator | None = None,
+    character_sheet: CharacterSheet | None = None,
 ) -> None:
-    """백그라운드에서 장면별 텍스트를 생성하고 잡 상태를 갱신한다."""
+    """백그라운드에서 장면별 텍스트를 생성하고 잡 상태를 갱신한다.
+
+    S35a 통합:
+        illustration_orchestrator + character_sheet 가 모두 주어지면
+        텍스트 생성 완료 후 일러스트 파이프라인(S26)을 실행하고,
+        각 StoryPage 에 illustration_url + consistency_score 를 저장한다.
+        둘 중 하나라도 None 이면 S19/S20 기존 동작(텍스트-only) 유지.
+    """
     job.status = JobStatus.IN_PROGRESS
+
+    # 텍스트와 일러스트 파이프라인이 같은 story_id 를 공유하도록 선행 생성.
+    # S3 키 `stories/{story_id}/scenes/{scene_id}.png` 가 DB 의 스토리와
+    # 1:1 로 매핑되어야 후속 조회/삭제가 일치한다.
+    pending_story_id = uuid.uuid4()
+    personalized_scenes: list[PersonalizedScene] = []
 
     try:
         async for scene in orchestrator.generate_story(
@@ -380,6 +510,7 @@ async def _run_generation(
         ):
             scene_data = scene.model_dump()
             job.scenes.append(scene_data)
+            personalized_scenes.append(scene)
             job.completed_scenes += 1
 
             # SSE 이벤트 발행
@@ -395,7 +526,38 @@ async def _run_generation(
                 job.total_scenes,
             )
 
-        # S20: DB 저장
+        # S35a: 일러스트 파이프라인 통합
+        illustrations_map: dict[str, OrchestratedIllustration] = {}
+        if illustration_orchestrator is not None and character_sheet is not None:
+            scene_emotions = {s.scene_id: s.emotion for s in confirmed_plan.scenes}
+            logger.info(
+                "job=%s illustration_start scenes=%d",
+                job.job_id,
+                len(personalized_scenes),
+            )
+            async for illus in illustration_orchestrator.generate_all_illustrations(
+                story_id=str(pending_story_id),
+                scenes=personalized_scenes,
+                character=character_sheet,
+                style=style,
+                scene_emotions=scene_emotions,
+            ):
+                illustrations_map[illus.scene_id] = illus
+                await job.event_queue.put(
+                    {
+                        "event": "illustration_complete",
+                        "scene_id": illus.scene_id,
+                        "image_url": illus.image_url,
+                    }
+                )
+                logger.info(
+                    "job=%s illustration_complete scene_id=%s composite=%.3f",
+                    job.job_id,
+                    illus.scene_id,
+                    illus.consistency_score.composite_score,
+                )
+
+        # S20 + S35a: DB 저장 (일러스트 맵 포함)
         if user_id and child_id and session_factory:
             job.story_id = await _save_story_to_db(
                 session_factory=session_factory,
@@ -404,6 +566,8 @@ async def _run_generation(
                 confirmed_plan=confirmed_plan,
                 style=style,
                 scenes=job.scenes,
+                story_id=pending_story_id,
+                illustrations=illustrations_map,
             )
 
         job.status = JobStatus.COMPLETED
@@ -521,6 +685,69 @@ async def plan_story(
     return PlanStoryResponse(plan=plan, preview=preview)
 
 
+@router.post("/plan/revise", response_model=PlanRevisionResponse)
+async def plan_revise(
+    request: PlanRevisionRequest,
+    orchestrator: OrchestratorDep,
+    db: DbDep,
+    current_user_id: CurrentUserDep,
+) -> PlanRevisionResponse:
+    """ScenePlan + 부모 피드백 → 수정된 ScenePlan + 새 StoryPreview (S31a).
+
+    S31(미리보기/수정) 화면이 호출. 응답의 `revision_count`를 다음 호출에
+    그대로 전달하면 서버가 한도(MAX_REVISIONS=3)를 검증한다.
+    """
+    # 1) 수정 횟수 한도 검증 (라우터 레벨, S31a 결정 메모 참조)
+    if request.revision_count >= MAX_REVISIONS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"수정은 최대 {MAX_REVISIONS}회까지 가능해요.",
+                "code": "MAX_REVISIONS_EXCEEDED",
+            },
+        )
+
+    # 2) 소유자 검증 + child_name 확보
+    profile = await _load_owned_child_profile(
+        db=db, user_id=current_user_id, child_id=request.child_id
+    )
+
+    # 3) revise + 새 preview
+    try:
+        revised_plan = await orchestrator.revise_plan(
+            plan=request.current_plan,
+            feedback=request.feedback,
+        )
+        preview = await orchestrator.get_preview(
+            plan=revised_plan,
+            style=DEFAULT_PREVIEW_STYLE,
+            child_name=profile.name,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("plan_revise_failed user_id=%s", current_user_id)
+        raise HTTPException(
+            status_code=500,
+            detail="이야기 수정 중 문제가 생겼어요. 잠시 후 다시 시도해주세요.",
+        ) from exc
+
+    new_revision_count = request.revision_count + 1
+    logger.info(
+        "plan_revise_done user_id=%s child_id=%s revision=%d/%d scenes=%d",
+        current_user_id,
+        request.child_id,
+        new_revision_count,
+        MAX_REVISIONS,
+        len(revised_plan.scenes),
+    )
+    return PlanRevisionResponse(
+        plan=revised_plan,
+        preview=preview,
+        revision_count=new_revision_count,
+    )
+
+
 @router.post("/generate", status_code=202, response_model=GenerateStoryResponse)
 async def generate_story(
     request: GenerateStoryRequest,
@@ -528,6 +755,7 @@ async def generate_story(
     orchestrator: OrchestratorDep,
     session_factory: SessionFactoryDep,
     current_user_id: CurrentUserDep,
+    illustration_context_provider: IllustrationContextDep,
 ) -> GenerateStoryResponse:
     """스토리 생성을 시작한다. 202 + jobId 반환. JWT 인증 필수."""
     # ChildInput → ChildProfile 변환
@@ -540,6 +768,16 @@ async def generate_story(
         friend_name=request.child.friend_name,
         favorite_animal=request.child.favorite_animal,
     )
+
+    # S35a: 일러스트 파이프라인 컨텍스트 해석.
+    # provider 가 None 이거나 (child, style) 에 대해 None 을 반환하면
+    # 텍스트-only 모드로 동작한다.
+    illustration_orchestrator: IllustrationOrchestrator | None = None
+    character_sheet: CharacterSheet | None = None
+    if illustration_context_provider is not None:
+        ctx = await illustration_context_provider(child, request.style)
+        if ctx is not None:
+            illustration_orchestrator, character_sheet = ctx
 
     total_scenes = len(request.confirmed_plan.scenes)
     job = job_manager.create_job(total_scenes=total_scenes)
@@ -555,9 +793,16 @@ async def generate_story(
         user_id=current_user_id,
         child_id=request.child.child_id,
         session_factory=session_factory,
+        illustration_orchestrator=illustration_orchestrator,
+        character_sheet=character_sheet,
     )
 
-    logger.info("job_created job_id=%s total_scenes=%d", job.job_id, total_scenes)
+    logger.info(
+        "job_created job_id=%s total_scenes=%d illustration=%s",
+        job.job_id,
+        total_scenes,
+        illustration_orchestrator is not None,
+    )
     return GenerateStoryResponse(job_id=job.job_id)
 
 
@@ -697,3 +942,38 @@ async def get_story(
             for p in sorted_pages
         ],
     )
+
+
+# S34: 스토리 삭제 엔드포인트 (내 서재에서 호출)
+#
+# 소유자가 아니거나 존재하지 않으면 404 로 통일한다(S20 GET 패턴과 일치).
+# Story.pages 는 모델에서 cascade="all, delete-orphan" 으로 선언되어 있어
+# session.delete(story) 시 자식 StoryPage 들이 함께 삭제된다.
+
+
+@router.delete("/{story_id}", status_code=204)
+async def delete_story(
+    story_id: str, db: DbDep, current_user_id: CurrentUserDep
+) -> Response:
+    """본인 소유 스토리를 삭제한다 (S34). JWT 인증 필수 + 소유자 검증."""
+    try:
+        story_uuid = uuid.UUID(story_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Story not found") from None
+
+    result = await db.execute(
+        select(StoryModel)
+        .options(selectinload(StoryModel.pages))
+        .where(StoryModel.id == story_uuid)
+    )
+    story = result.scalar_one_or_none()
+    if story is None or str(story.user_id) != current_user_id:
+        # 소유자 정보 노출 방지를 위해 "없음"과 "남의 것"을 동일 처리.
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    await db.delete(story)
+    await db.commit()
+
+    logger.info("story_deleted user_id=%s story_id=%s", current_user_id, story_id)
+    # 204 No Content — 본문 없음.
+    return Response(status_code=204)

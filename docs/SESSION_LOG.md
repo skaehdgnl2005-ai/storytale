@@ -4,6 +4,526 @@
 
 ---
 
+## S35a — 백엔드 통합 E2E (2026-04-11)
+
+### 완료된 것
+- **텍스트 파이프라인(S18) + 일러스트 파이프라인(S26) 통합 E2E 테스트** — `packages/backend/tests/test_s35a_text_illustration_e2e.py` (7 케이스). `POST /api/v1/stories/generate` → 텍스트 장면 yield → 일러스트 장면 yield → Story + StoryPage(`illustration_url` + `consistency_score`) DB 저장 → `GET /api/v1/stories/{id}` 전체 조회까지 하나의 플로우로 검증.
+  - **TDD RED → GREEN** — 먼저 테스트 파일이 `get_illustration_context_provider` 를 import 하여 `ImportError` 1건 RED 확인 → 라우터에 통합 지점 추가 후 7/7 통과.
+  - **테스트 범주**:
+    - `TestTextIllustrationE2E` (4): 전체 플로우 DB 저장 확인 / GET 응답의 `illustration_url` 확인 / 라우터와 일러스트 파이프라인이 같은 `story_id` 공유 확인 (S3 키 `stories/{id}/scenes/{scene_id}.png` ↔ DB 1:1) / `ScenePlan.scenes[].emotion` 이 `scene_emotions` 로 전달되는지 확인.
+    - `TestIllustrationFailureGraceful` (1): 일러스트 파이프라인 중간 실패(`IllustrationOrchestratorError`) → job status `failed` + 에러 보존, 단 `job.scenes` 에는 이미 수집된 텍스트 3개가 남아있음(부분 결과 보존).
+    - `TestTextOnlyBackwardsCompat` (2): `get_illustration_context_provider` 를 오버라이드하지 않으면 기존 S19/S20 동작 그대로 — 텍스트만 생성 + `illustration_url`/`consistency_score` 는 `None` 저장.
+- **라우터 신규 통합 지점** — `packages/backend/src/storytale/api/stories/router.py`:
+  - **`get_illustration_context_provider()` 의존성** — 신규. 기본값 `None` 반환 → 텍스트-only. 반환 타입은 `IllustrationContextProvider | None` (async callable: `(ChildProfile, style: str) → tuple[IllustrationOrchestrator, CharacterSheet] | None`). 테스트는 `app.dependency_overrides` 로 팩토리 주입.
+  - **`IllustrationContextDep` Annotated** — `generate_story` 엔드포인트가 이 의존성을 받아 `(child, style)` 에 대해 해석 → 결과가 있으면 `(illustration_orchestrator, character_sheet)` 쌍을 `_run_generation` 에 전달.
+  - **`_run_generation` 시그니처 확장** — `illustration_orchestrator: IllustrationOrchestrator | None`, `character_sheet: CharacterSheet | None` 매개변수 추가(기본 None). 둘 다 None 이 아니면 텍스트 장면 수집 후 `illustration_orchestrator.generate_all_illustrations()` 를 AsyncGenerator 로 순회하여 `illustrations_map: dict[scene_id, OrchestratedIllustration]` 구축.
+  - **`pending_story_id` 선행 생성** — 텍스트/일러스트/DB 저장이 같은 UUID 를 공유하도록 `_run_generation` 진입 시 `uuid.uuid4()` 로 선행 생성하여 S3 키와 DB 행이 1:1 매핑되도록 보장.
+  - **`_save_story_to_db` 시그니처 확장** — `story_id: uuid.UUID | None` (선행 주입), `illustrations: dict[str, OrchestratedIllustration] | None` 파라미터 추가. 저장 시 각 `StoryPage` 의 `illustration_url = illus.image_url`, `consistency_score = illus.consistency_score.composite_score` 를 설정. `illustrations=None` 이면 둘 다 `None` (S19/S20 하위 호환).
+  - **SSE 신규 이벤트 `illustration_complete`** — 일러스트 장면 완료 시 `event_queue` 에 `{event: "illustration_complete", scene_id, image_url}` 발행. 기존 `scene_complete`(텍스트) + `complete`/`error` 와 공존. S32 GenerationScreen 은 현재 폴링 기반이라 이 이벤트는 후속 SSE 연결 시 활용.
+
+### TDD 워크플로우
+1. **RED**: `tests/test_s35a_text_illustration_e2e.py` 작성(7 케이스) → `pytest tests/test_s35a_text_illustration_e2e.py -x` → `ImportError: cannot import name 'get_illustration_context_provider' from 'storytale.api.stories.router'` 로 import 단계에서 실패 확인.
+2. **GREEN 1 — 통합 지점 도입**: router.py 에 `IllustrationContextProvider` 타입 별칭 + `get_illustration_context_provider()` + `IllustrationContextDep` Annotated 추가 → `CharacterSheet`/`IllustrationOrchestrator`/`OrchestratedIllustration` import → `PersonalizedScene` import 추가.
+3. **GREEN 2 — `_save_story_to_db` 확장**: `story_id` 선행 주입 + `illustrations` 매핑 → `StoryPage` 에 `illustration_url`/`consistency_score` 반영.
+4. **GREEN 3 — `_run_generation` 일러스트 루프**: 텍스트 수집 단계에 `personalized_scenes: list[PersonalizedScene]` 를 누적 → 텍스트 완료 후 `illustration_orchestrator.generate_all_illustrations()` 순회 → `illustrations_map` 구축 → `_save_story_to_db` 호출 시 주입. `scene_emotions` 는 `confirmed_plan.scenes` 에서 `{scene_id: emotion}` 로 구성.
+5. **GREEN 4 — `/generate` 엔드포인트 와이어링**: `IllustrationContextDep` 주입 → provider 가 `None` 이면 텍스트-only, 있으면 `await provider(child, style)` 해석 → 튜플을 `_run_generation` 에 전달.
+6. **검증**: `pytest tests/test_s35a_text_illustration_e2e.py` → 7/7 통과.
+7. **회귀**: `pytest tests/test_s19_story_api.py tests/test_s20_story_storage.py tests/test_s30a_plan_endpoint.py tests/test_s31a_plan_revise_endpoint.py tests/test_s34_story_delete_endpoint.py tests/test_s26_illustration_orchestrator.py tests/test_s35a_text_illustration_e2e.py` → **79/79 통과**.
+8. **린트**: `ruff check src/storytale/api/stories/router.py tests/test_s35a_text_illustration_e2e.py` → 통과. `ruff format` → `test_s35a_text_illustration_e2e.py` 1 파일 재포맷(한 줄 길이 스타일) → 재실행 79/79 통과.
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/backend/src/storytale/api/stories/router.py::IllustrationContextProvider` — `(ChildProfile, str) → Awaitable[tuple[IllustrationOrchestrator, CharacterSheet] | None]` 타입 별칭
+  - `packages/backend/src/storytale/api/stories/router.py::get_illustration_context_provider` — 기본 `None` 반환 의존성. 테스트 오버라이드 지점.
+  - `packages/backend/src/storytale/api/stories/router.py::IllustrationContextDep` — Annotated 타입
+  - `packages/backend/src/storytale/api/stories/router.py::_run_generation` — S35a 확장: `illustration_orchestrator`/`character_sheet` 인자 + 선행 `pending_story_id` + 일러스트 루프 + `illustrations_map`
+  - `packages/backend/src/storytale/api/stories/router.py::_save_story_to_db` — `story_id`/`illustrations` 인자 추가
+  - `packages/backend/src/storytale/api/stories/router.py::generate_story` — `IllustrationContextDep` 주입, provider 해석 후 background task 에 전달
+  - `packages/backend/tests/test_s35a_text_illustration_e2e.py` — 7 테스트(`TestTextIllustrationE2E`, `TestIllustrationFailureGraceful`, `TestTextOnlyBackwardsCompat`) + `_make_fake_character_sheet`/`_make_passing_score` 헬퍼 + `client_with_illustration`/`client_text_only` 픽스처 분리
+- **계약 대비 변경점**:
+  - `contracts/illustration-pipeline.ts::IllustrationOrchestrator.generateAllIllustrations` 는 호출 방법만 정의하고 호출 시점은 정의하지 않음. S35a 는 **"텍스트 장면 수집 완료 후 일괄 호출"** 전략을 채택(장면마다 병렬 호출이 아님). 이유: (1) 텍스트 장면이 순차 yield 되는 동안 일러스트를 병렬로 돌리면 캐릭터 시트가 모든 장면에 걸쳐 공유되므로 배치 처리 이점이 적고, (2) `generate_all_illustrations` 자체가 AsyncGenerator 라 scene 단위 yield 를 이미 지원함, (3) 일러스트 단계에서 실패해도 텍스트 결과는 `job.scenes` 에 남아있어 디버깅/수동 재시도가 가능.
+  - `contracts/story-engine.ts::StoryOrchestrator` 는 텍스트만 담당 — 일러스트와의 통합은 오케스트레이터 밖(라우터 `_run_generation`)에서 수행. 이는 contracts 의 경계(텍스트 vs 일러스트 오케스트레이터 분리)를 그대로 유지한다.
+  - `StoryPage` 의 `consistency_score` 컬럼은 S3(DB 모델) 단계부터 존재했으나 본 세션이 처음 실제로 값을 채움(이전까지는 `None` 으로만 저장).
+- **환경변수**: 추가 없음. `REPLICATE_API_TOKEN`(S21), `AWS_S3_BUCKET`/`AWS_REGION`(S25) 은 실제 `IllustrationContextProvider` 구현 시점에 필요하며, S35a 테스트는 전 과정을 mock 으로 대체하므로 불필요.
+- **의존 모듈 사용**:
+  - `IllustrationOrchestrator`, `OrchestratedIllustration` (S26) — 라우터가 생성자/반환 타입으로 사용
+  - `CharacterSheet` (S22b) — context provider 반환 튜플의 두 번째 요소
+  - `ConsistencyScore.composite_score` (S24) — `StoryPage.consistency_score` 에 저장
+  - `PersonalizedScene` (S17) — `_run_generation` 에서 텍스트 수집용 누적 + 일러스트 오케스트레이터 입력
+  - 기존 S19/S20 의 `StoryOrchestrator`, `JobState`, `_save_story_to_db`, `get_session_factory`, `job_manager`
+
+### 다음 세션에 알려줄 것
+- **`get_illustration_context_provider` 프로덕션 구현은 아직 미연결** — 기본값 `None` 이므로 프로덕션 POST /generate 는 여전히 텍스트-only 로 동작한다. 실제 구현 시 필요한 것:
+  1. `CharacterSheetService` (S22b) 인스턴스 조립 — `ReplicateClient` + `LLMClient` + `art-direction.json` style_definitions 주입
+  2. `photo_hash` 조회 — `ChildProfile.character_sheet_url` 또는 별도 캐시 테이블에서 기존 시트 찾기
+  3. 없으면 `FaceAnchorService` → `CharacterSheetService` 파이프라인 실행 (사진 업로드 UI 가 S28 프로필 등록에 연결되어야 함)
+  4. `IllustrationOrchestrator` 조립 — `SceneIllustrationService` + `ConsistencyValidator` + `InpaintingService` + `ImageStorageService` 주입. CLIP/DINOv2 모델 래퍼는 S24 세션 노트 참조 — 여전히 미구현이라 실제 품질 검증은 더미 모델 또는 외부 API 래퍼 필요.
+- **S35b (프론트-백 E2E) 진입 시 할 일**:
+  1. S35a 의 mock 패턴 그대로 프론트엔드 Detox/Playwright 시나리오 — 단, CLIP/DINOv2 까지 실제 호출은 여전히 불가.
+  2. SSE `illustration_complete` 이벤트 소비 — 현재 S32 GenerationScreen 은 폴링 기반이라 `JobStatusResponse.scenes` 에 `illustration_url` 이 채워지는지 확인하는 방식으로 간접 검증 가능.
+  3. Viewer 가 `illustration_url` 의 실제 S3 이미지를 렌더하는지 실기기에서 확인 — S33 가 placeholder(`🎨 "그림은 곧 도착해요"`) 를 준비해 두었으므로 `null → URL` 전환만 테스트.
+- **발견된 이슈/이월 사항**:
+  - **SSE 이벤트 `illustration_complete` 는 클라이언트 미소비** — S32 GenerationScreen 이 폴링이라 본 세션에선 소비하지 않음. SSE 복귀 시점까지는 이벤트가 `event_queue` 로 방출되되 아무도 읽지 않는다. 테스트는 이벤트 큐 대신 `GET /jobs/{id}` 폴링으로 검증.
+  - **일러스트 단계의 부분 실패 재시도 전략 미도입** — 일러스트 오케스트레이터 내부 재시도(S26: 2회 재생성 + 1회 인페인팅)에 의존하고, 거기서도 실패하면 `_run_generation` 이 전체 job 을 `failed` 처리. 일부 장면만 일러스트 실패 시 텍스트는 저장하고 해당 장면만 `illustration_url=None` 으로 두는 "부분 성공" 경로는 아직 없음 — S35b 실기기 검증 후 사용자 체감에 따라 결정.
+  - **`pending_story_id` 와 DB story_id 충돌 가능성** — 본 세션에서 router 가 UUID 를 선행 생성하여 DB 에 insert. 매우 드문 UUID 충돌은 기존 S20 구현과 동일한 가정(uuid4 천문학적 충돌 확률) 유지.
+
+### 변경된 파일 목록
+- `packages/backend/src/storytale/api/stories/router.py` (수정: S35a 통합 지점 추가 — imports + `IllustrationContextProvider` + `get_illustration_context_provider` + `IllustrationContextDep` + `_save_story_to_db` 시그니처 확장 + `_run_generation` 일러스트 루프 + `generate_story` 엔드포인트 와이어링)
+- `packages/backend/tests/test_s35a_text_illustration_e2e.py` (신규, 7 케이스)
+
+---
+
+## S34 — 내 서재 (2026-04-11)
+
+### 완료된 것
+- **백엔드 `DELETE /api/v1/stories/{story_id}` 신규 라우트** — `packages/backend/src/storytale/api/stories/router.py::delete_story`. JWT 인증 필수 + 소유자 검증. 응답 204 No Content (본문 없음).
+  - **소유자 검증** — S20 GET 패턴과 일치: 존재하지 않음 / UUID 형식 오류 / 다른 사용자 소유 모두 404 로 동일 처리(소유자 정보 노출 방지).
+  - **자식 행 cascade 삭제** — `Story.pages` 관계는 [models.py:103-105](packages/backend/src/storytale/db/models.py#L103-L105)에서 이미 `cascade="all, delete-orphan"` 으로 선언되어 있어, `await db.delete(story)` 한 번으로 자식 `StoryPage` 들이 함께 삭제된다(테스트로 직접 검증).
+  - **응답 본문** — `Response(status_code=204)` 를 명시 반환. FastAPI 의 빈 응답 처리 + httpx 의 `resp.content == b""` 단정과 호환.
+- **백엔드 신규 테스트 파일** — `packages/backend/tests/test_s34_story_delete_endpoint.py` (10개 케이스).
+  - **TDD RED → GREEN** — 라우트 추가 전 첫 실행 → `405 Method Not Allowed` 1건 실패 확인 → `delete_story` 구현 후 10/10 통과.
+  - **테스트 케이스**:
+    - `TestDeleteStoryHappyPath` (5): 204 응답, DB 행 제거, pages cascade 제거(5개 → 0개), DELETE 후 GET 404, 다른 스토리에 영향 없음.
+    - `TestDeleteStoryAuth` (1): 401 (Authorization 헤더 없음).
+    - `TestDeleteStoryOwnership` (4): 존재 안 함 404, 잘못된 UUID 404, 다른 사용자 소유 시도 404 + 원본 보존, 같은 시도 두 번 후에도 원본 보존.
+  - **시드 헬퍼** — `_seed_story()` 가 `TestingSessionLocal` 로 직접 Story + StoryPage 행을 삽입한다. generate 잡 플로우를 우회해 DELETE 본질에만 집중. 이전 S30a/S31a 의 실제 로그인 + ChildProfile 패턴(`_login` + `child_id` 픽스처)은 그대로 재사용해 인증/소유자 흐름은 통합 검증.
+- **mobile `stories.ts` 확장** — `packages/mobile/src/api/stories.ts`:
+  - 와이어 타입: `StoryListItem`, `StoryListResponse` — 백엔드 `StoryListItem`/`StoryListResponse` (router.py::S20) 와 1:1 매칭(snake_case).
+  - 함수: `listStories({ limit, offset }) → GET /stories?limit=&offset=` (기본 limit=`STORIES_PAGE_SIZE`=20).
+  - 함수: `deleteStory(storyId) → DELETE /stories/{id}` — `apiFetch` 가 204 일 때 `undefined` 반환하므로 본 함수 시그니처는 `Promise<void>`.
+  - 상수: `STORIES_PAGE_SIZE = 20` (한 화면 카드 ~6개 + 여유분).
+  - 에러 매핑 주석 — 401(JWT 만료), 404(이미 삭제됨/소유자 불일치), 그 외("잠깐, 다시 한번 해볼게요 😊") 패턴을 S33 `getStory` 와 동일하게 유지.
+- **LibraryScreen 신규** — `packages/mobile/src/screens/LibraryScreen.tsx`. Home → Library → (탭) Viewer → (back) Library 흐름.
+  - **라우트 파라미터**: 없음(`Library: undefined`). 마운트 시 `listStories()` 1회 호출.
+  - **4상태 분기**:
+    - **loading** — `ActivityIndicator` + "이야기를 펼치고 있어요 📖".
+    - **error** — 401 시 "다시 로그인해주세요", 그 외 "잠깐, 다시 한번 해볼게요 😊". "다시 시도" CTA 제공.
+    - **empty** — `🌱` + "첫 번째 이야기를 만들어볼까요?" + "이야기 만들기" CTA → `navigation.navigate("PurposeSelect")`.
+    - **list** — `FlatList` + `RefreshControl`(pull-to-refresh) + 카드 사이 12px separator.
+  - **카드 레이아웃** — 가로 row: `📖` 커버(68×68 primaryLight) + 제목(2줄 truncate) + 서브타이틀(`2026.04.11 · 12페이지 · 완성`). 카드 minHeight 96, borderRadius 20, cardShadow.
+  - **카드 액션**:
+    - **탭** → `navigation.navigate("Viewer", { storyId })`. Library 는 stack 에 남아 back 시 다시 Library 로 복귀.
+    - **long-press(400ms)** → `Alert.alert("이야기를 지울까요?")` 확인 → `deleteStory(id)` → 성공/404 시 로컬 state 에서 제거. 401 시 재로그인 안내. 그 외 "잠깐, 다시 한번 해볼게요 😊".
+  - **헬퍼 함수** — `formatCreatedAt(iso)`(ISO → `YYYY.MM.DD`, 파싱 실패 시 원본 반환), `statusLabel(status)`(현재 `completed`만 사용되지만 draft/failed 도입 시 확장 지점).
+  - **S33 `ViewerReady` 분리 패턴 미적용** — Library 는 list 상태에서 추가 훅이 필요 없고 4상태 모두 early return 으로 처리되어 단일 컴포넌트로 충분(Rules of Hooks 위반 없음).
+- **AppNavigator 확장** — `packages/mobile/src/navigation/AppNavigator.tsx`:
+  - `RootStackParamList["Library"] = undefined` 라우트 시그니처 추가.
+  - `import { LibraryScreen }` + `Stack.Screen name="Library" options={{ title: "내 서재" }}` 등록.
+- **HomeScreen "내 서재" 진입 버튼** — `packages/mobile/src/screens/HomeScreen.tsx`:
+  - "이야기 만들기" 버튼 아래에 `libraryButton`(textSecondary 색 + underline) 추가. 1차/2차 CTA 와 시각적 우선순위 구분 — 첫 사용자에게는 "프로필 만들기 → 이야기 만들기" 흐름이 1차이고, 재방문 사용자에게는 "내 서재"가 2차로 자연스럽게 잡히도록.
+  - 터치 타겟 minHeight 44 + accessibilityLabel 유지.
+- **ViewerScreen 삭제 CTA** — `packages/mobile/src/screens/ViewerScreen.tsx`:
+  - `useEffect(() => navigation.setOptions({ headerRight: ... }), [story])` 로 스토리 로드 후에만 `headerRight` 에 "지우기" 텍스트 버튼 노출. 로딩/에러 상태에서는 `undefined` 로 비워 잘못 누름 방지.
+  - 삭제 핸들러 `handleDelete` — `Alert.alert("이야기를 지울까요?")` 확인 → `deleteStory(storyId)` → `navigation.goBack()`. 진입 경로 두 가지(Generation→reset / Library→push) 모두에서 `goBack()` 만으로 자연 복귀(전자: Home, 후자: Library 카드 사라진 상태). 404 는 이미 삭제된 것으로 간주하고 동일하게 goBack.
+  - import 추가: `Alert`, `deleteStory`. 새 스타일 `headerDeleteButton`/`headerDeleteText`(`theme.colors.error` 색).
+
+### TDD 워크플로우
+1. **백엔드 (RED → GREEN)**:
+   - `tests/test_s34_story_delete_endpoint.py` 작성(10 케이스) → `pytest -x` → 첫 케이스 `test_delete_returns_204` 가 `405 != 204` 로 실패 확인(라우트 미존재).
+   - `delete_story` 구현 + `Response`/`selectinload` import 추가 → `pytest` → 10/10 통과.
+   - `ruff check` → I001(import sorted)/E501(line too long) 2건 → `from fastapi import (...)` 로 멀티라인 분해 → `ruff format` 적용 → 통과.
+   - 회귀 — `test_s19+s20+s30a+s31a+s34` 합본 **59/59 통과**.
+2. **mobile (RED → GREEN, 컴파일 타임)** — jest-expo 미복구 지속이라 S29/S31/S32/S33 패턴 재사용:
+   - RED: `AppNavigator.tsx` 에 `import { LibraryScreen } from "../screens/LibraryScreen"` 만 먼저 추가 → `npx tsc --noEmit` → `TS2307: Cannot find module '../screens/LibraryScreen'` 1건 실패 확인.
+   - GREEN: `stories.ts` 확장 + `LibraryScreen.tsx` 작성 + `Library` 라우트 + Stack.Screen 등록 + HomeScreen `libraryButton` + ViewerScreen `headerRight` 삭제 CTA → `npx tsc --noEmit` → exit 0.
+   - `RootStackParamList["Library"]` 시그니처 + `StoryListItem`/`StoryListResponse` 필드 매칭 + `deleteStory` 시그니처 덕분에 라우트 진입/리스트 카드 렌더/삭제 흐름이 모두 컴파일 타임 검증.
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/backend/src/storytale/api/stories/router.py::delete_story` — `DELETE /stories/{story_id}` 라우트, 소유자 검증 + cascade 삭제 + 204 응답
+  - `packages/backend/tests/test_s34_story_delete_endpoint.py` — 10개 테스트 (happy/auth/ownership) + `_seed_story()` 헬퍼
+  - `packages/mobile/src/api/stories.ts::listStories` — `GET /stories?limit=&offset=`
+  - `packages/mobile/src/api/stories.ts::deleteStory` — `DELETE /stories/{id}` (Promise<void>, 204 처리)
+  - `packages/mobile/src/api/stories.ts::StoryListItem`/`StoryListResponse` — 백엔드 1:1 매칭
+  - `packages/mobile/src/api/stories.ts::STORIES_PAGE_SIZE` — 기본 페이지 크기 상수
+  - `packages/mobile/src/screens/LibraryScreen.tsx::LibraryScreen` — 4상태 분기 + 카드 + Alert 삭제
+  - `packages/mobile/src/screens/LibraryScreen.tsx::formatCreatedAt`/`statusLabel` — 카드 부제목 포매터
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — `Library: undefined` 라우트 + Stack.Screen
+  - `packages/mobile/src/screens/HomeScreen.tsx::libraryButton` — 2차 CTA, textSecondary + underline
+  - `packages/mobile/src/screens/ViewerScreen.tsx::handleDelete` — Alert 확인 + `deleteStory` + `goBack`
+  - `packages/mobile/src/screens/ViewerScreen.tsx::useEffect(setOptions)` — 스토리 로드 후 `headerRight` "지우기" 노출
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts` 는 HTTP DELETE 엔드포인트를 정의하지 않음. 본 세션이 추가한 `DELETE /stories/{id}` 와 `StoryListItem`/`StoryListResponse` 와이어 타입은 백엔드 Pydantic 직렬화 형태(snake_case)를 따른다 — S20/S30b/S31/S32/S33 에서 누적 결정한 규약 유지.
+  - `Story.pages` cascade 는 S3(DB 모델) 단계부터 선언되어 있던 것을 본 세션에서 처음 활용. 모델 변경 없음.
+- **환경변수**: 추가 없음. `EXPO_PUBLIC_API_URL`(S28)/`JWT_SECRET_KEY`(S27) 만 사용.
+- **의존 모듈 사용**:
+  - 백엔드: `StoryModel`/`StoryPageModel` (S3), `selectinload` (S20 패턴), `CurrentUserDep` (S27), `get_db` (S4)
+  - mobile: `apiFetch`/`ApiClientError` (S28 client.ts), `theme` (S28), `RootStackParamList` (S28~S33 누적 확장)
+  - mobile: 백엔드 `GET /api/v1/stories` (S20) — 목록, `DELETE /api/v1/stories/{id}` (S34 본 세션) — 삭제, `GET /api/v1/stories/{id}` (S20) — 카드 탭 후 Viewer 가 호출
+
+### 다음 세션에 알려줄 것
+- **G4.5 리뷰 범위 최종 확장** — 이제 모바일 핵심 플로우 6단계가 모두 연결됨: **프로필 만들기 → 목적 선택 → 서술형 입력 → 미리보기/수정 → 생성 진행 → 그림책 열람 → 내 서재 재열람/삭제**. 새 사용자 첫 진입(Home → ProfileForm → PurposeSelect → ...) 과 재방문 사용자 진입(Home → Library → 카드 탭 → Viewer) 두 시나리오 모두 검증 가능.
+- **S35a (백엔드 통합 E2E) 진입 시 할 일**:
+  1. POST /stories/plan → POST /stories/plan/revise → POST /stories/generate → 폴링 → GET /stories/{id} → DELETE /stories/{id} 까지 한 시나리오로 E2E 검증.
+  2. 일러스트 파이프라인(S26) 연결 후에는 `illustration_url` 채워짐 + Viewer placeholder 가 실제 이미지로 교체되는 것까지 같은 E2E 에서 확인.
+- **S35b (프론트-백 E2E) 진입 시**: S34 까지 모든 화면이 갖춰져 있으므로 Detox 또는 Playwright(웹 미러) 같은 도구만 도입하면 됨. 단, `mobile jest 미복구`는 여전히 — Detox 도입 시 별도 인프라 작업 필요.
+- **발견된 이슈/이월 사항**:
+  - **LibraryScreen 페이지네이션 미구현** — 본 세션은 첫 페이지(`offset=0, limit=20`)만 로드. 20권 이상 보유한 사용자를 위해 `onEndReached` 기반 infinite scroll 은 후속(post-S35b 실기기 검증 후 결정).
+  - **삭제 confirmation 의 i18n** — Alert 본문에 스토리 제목을 그대로 삽입하므로(`"${story.title}" 을(를)`), 영문/숫자만 있는 제목에서 조사가 어색할 수 있음. KO-only MVP 범위에서는 충분.
+  - **ViewerScreen `headerRight` 의존성 배열** — `useEffect([navigation, story, handleDelete])` 인데 `handleDelete` 가 `useCallback([navigation, story, storyId])` 라 사실상 story 변경 시마다 새 함수 → setOptions 재호출. 첫 로드 후 story 가 immutable 이라 1회만 발생하므로 문제 없음.
+  - **mobile jest 미복구 지속** — S29/S31/S32/S33 와 동일. RTL 기반 LibraryScreen 의 Alert 모킹/탭 시뮬레이션이 필요하면 별도 인프라 태스크.
+- **Phase 6 완료 선언** — S34 가 마지막이므로 본 세션 후 Phase 6(프론트엔드)이 닫힌다. PROGRESS.md 의 Phase 6 는 10/10 으로 갱신, 차단 테이블에서 S35b 도 해소.
+
+### 변경된 파일 목록
+- `packages/backend/src/storytale/api/stories/router.py` (수정: `delete_story` 라우트 + `Response` import)
+- `packages/backend/tests/test_s34_story_delete_endpoint.py` (신규, 10 케이스)
+- `packages/mobile/src/api/stories.ts` (확장: `StoryListItem`/`StoryListResponse`/`STORIES_PAGE_SIZE`/`listStories`/`deleteStory`)
+- `packages/mobile/src/screens/LibraryScreen.tsx` (신규, 약 350줄)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (확장: `Library: undefined` 라우트 + Stack.Screen)
+- `packages/mobile/src/screens/HomeScreen.tsx` (수정: `libraryButton` 추가)
+- `packages/mobile/src/screens/ViewerScreen.tsx` (수정: `Alert`/`deleteStory` import + `handleDelete` + `useEffect(setOptions headerRight)` + `headerDeleteButton`/`headerDeleteText` 스타일)
+- `docs/PROGRESS.md` (Phase 6 10/10 + 현재 위치/차단 갱신)
+- `docs/TASK_BACKLOG.md` (S34 [완료])
+- `docs/SESSION_LOG.md` (본 항목)
+
+---
+
+## S33 — 모바일 그림책 뷰어 (2026-04-11)
+
+### 완료된 것
+- **ViewerScreen** — `packages/mobile/src/screens/ViewerScreen.tsx`. Preview → Generation → **Viewer** 흐름의 다섯 번째(마지막) 화면. Generation 완료 CTA 가 `navigation.reset({ index: 1, routes: [{ name: "Home" }, { name: "Viewer", params: { storyId } }] })` 로 전환 — 뷰어에서 back 시 Home 으로 바로 이동(Generation 재방문 방지).
+  - **라우트 파라미터**: `{ storyId: string }`. 마운트 시 `getStory(storyId)` 1회 호출 → `StoryDetailResponse` 로 페이지 목록 수신.
+  - **페이지 넘기기** — 가로 `FlatList` + `pagingEnabled` + `decelerationRate="fast"`. 스와이프 1회당 1페이지. `getItemLayout` 으로 페이지 폭 고정 힌트 제공(성능 + 첫 렌더 flex 이슈 가드).
+  - **페이지 아이템 레이아웃**:
+    - 일러스트 영역: `aspectRatio: 4/3`, `borderRadius: 20`, cardShadow. `illustration_url` 있으면 `<Image resizeMode="cover">`, 없으면 `🎨` + "그림은 곧 도착해요" placeholder(S26 미완료 가드).
+    - 텍스트 카드: "N페이지" 뱃지 + 본문(`fontSize: 16, lineHeight: 26`). 본문이 길면 페이지 내부 `ScrollView` 로 세로 스크롤.
+  - **페이지 인디케이터** — `onMomentumScrollEnd` 에서 `contentOffset.x / screenWidth` 반올림으로 현재 index 추적. 하단에 "3 / 12" 형식으로 표시 + `accessibilityLabel="3페이지 / 전체 12페이지"`.
+  - **하단 푸터** — 페이지 인디케이터 + "처음으로" primary 버튼(`navigation.popToTop()`).
+  - **로딩/에러 상태**:
+    - 로딩: `ActivityIndicator` + "이야기를 펼치고 있어요 📖" (CLAUDE.md 톤 가이드).
+    - 에러: 401 → "다시 로그인해주세요", 404 → "이야기를 찾을 수 없어요", 그 외 → "잠깐, 다시 한번 해볼게요 😊". 에러 화면에서도 "처음으로" 버튼 제공.
+  - **성공 상태 분리 컴포넌트** — `ViewerReady` 를 같은 파일 내에서 분리. `useMemo`(clampedIndex) 훅이 조건부 렌더 이후에 오지 않도록 하기 위해 분리했다(React Rules of Hooks).
+  - **디자인 준수** — warm pastel + borderRadius 14/20 + Pretendard + shadowColor "#3E3225" + 터치 타겟 ≥ 52px (S28~S32 과 일관).
+- **stories API 클라이언트 확장** — `packages/mobile/src/api/stories.ts`:
+  - 와이어 타입: `StoryPageDetail`, `StoryDetailResponse` — 백엔드 `StoryPageResponse`/`StoryDetailResponse` (router.py::S20) 와 1:1 매칭(snake_case).
+  - 함수: `getStory(storyId) → GET /stories/{story_id}`. apiFetch 재사용으로 JWT 자동 첨부 + 소유자 검증은 서버 JWT 기준.
+  - **`StoryPageDetail` vs `GeneratedScene` 분리 결정**: `GeneratedScene` 은 생성 진행 중 잡 폴링 스냅샷(`scene_id` 기반)이고, `StoryPageDetail` 은 DB 저장 후 조회용으로 `id`(페이지 row PK) + `scene_id` 모두 가짐. 뷰어 `FlatList` keyExtractor 는 `id` 를 쓴다.
+- **AppNavigator 확장** — `packages/mobile/src/navigation/AppNavigator.tsx`:
+  - `Viewer: { storyId: string }` 라우트 타입 추가.
+  - `import { ViewerScreen }` + `Stack.Screen name="Viewer"` 등록 (`options={{ title: "그림책" }}`).
+- **GenerationScreen 수정 (S32 후속 이슈 해소)** — `packages/mobile/src/screens/GenerationScreen.tsx`:
+  - **`storyId` state 승격** — S32 SESSION_LOG 의 "발견된 이슈" 1번. `pollOnce` 가 받은 `snapshot.story_id` 를 state 로 저장. 백엔드 `_run_generation` 은 `job.status = COMPLETED` 직전에 `job.story_id` 를 채우므로, `status === "completed"` 스냅샷에서 `story_id` 는 항상 채워져 있다(같은 스냅샷 → 단일 렌더 커밋).
+  - **`handleOpenBook` 교체** — S32 의 Alert 임시 처리(`// TODO(S33)` 위치)를 제거하고 `navigation.reset({ index: 1, routes: [{ name: "Home" }, { name: "Viewer", params: { storyId } }] })` 로 전환. Generation 스택은 뒤로가기가 차단된 화면이라 `navigation.navigate` 로 Viewer 를 쌓으면 Viewer → back 시 Generation 으로 돌아와 혼란이 생기므로 reset 을 사용한다.
+  - **방어 코드** — 원칙상 완료 스냅샷에 `story_id` 가 있어야 하지만, 혹시라도 누락되면 `handleBackToHome()` 으로 안전 복귀 (무한 루프 방지).
+  - **import 정리** — `Alert` 사용처가 제거되어 import 에서 제외.
+- **TDD (RED → GREEN, 컴파일 타임)** — jest-expo 미복구 상태(S29/S31/S32 지속)이므로 `npx tsc --noEmit` 기반 컴파일 타임 TDD 패턴 재사용:
+  1. RED: `AppNavigator.tsx` 에 `import { ViewerScreen } from "../screens/ViewerScreen"` 만 먼저 추가 → `npx tsc --noEmit` → `TS2307: Cannot find module '../screens/ViewerScreen'` 1건 실패 확인.
+  2. GREEN: `stories.ts` 확장(`StoryDetailResponse`/`StoryPageDetail`/`getStory`) + `ViewerScreen.tsx` 작성 + `Viewer` 라우트 + Stack.Screen 등록 + GenerationScreen `storyId` state + `handleOpenBook` 교체 → `npx tsc --noEmit` → exit 0.
+  3. `RootStackParamList["Viewer"]` 시그니처 + `navigation.reset` routes 배열 타입 + `StoryDetailResponse` 필드 매칭 덕분에 Generation → Viewer 파라미터 전달과 `getStory` 응답 소비가 모두 컴파일 타임 검증.
+- **백엔드 회귀 확인** — 본 세션이 백엔드를 건드리지 않았지만 smoke 차원에서 스토리 경로 회귀 실행: `pytest tests/test_s19_story_api.py tests/test_s20_story_storage.py tests/test_s30a_plan_endpoint.py tests/test_s31a_plan_revise_endpoint.py` → **49/49 통과**. (S20 의 `GET /stories/{id}` 는 뷰어가 호출하는 엔드포인트 — 응답 스키마가 변하지 않았음을 확인.)
+
+### 페이지 넘기기 방식 결정
+- **선택**: 가로 `FlatList` + `pagingEnabled` 스와이프(버튼 없음).
+- **이유**:
+  1. 책 넘기기 메타포에 가장 가까움 — 손가락 스와이프 = 실제 책 페이지 넘기기.
+  2. 백 버튼/next 버튼 두 개 추가 시 하단 CTA 영역이 붐벼 문학적 경험을 해침(아이가 부모 무릎에서 보는 책이라는 컨셉).
+  3. `getItemLayout` + `windowSize: 3` + `maxToRenderPerBatch: 2` 로 성능 튜닝.
+- **이월**: 실기기 테스트 후 접근성 이슈(스크린리더 네비게이션)가 발견되면 보조 이전/다음 버튼을 헤더에 숨은 링크로 추가 검토(post-S35b).
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/mobile/src/screens/ViewerScreen.tsx::ViewerScreen` — 메인 컴포넌트(로딩/에러/성공 상태 분기)
+  - `packages/mobile/src/screens/ViewerScreen.tsx::ViewerReady` — 성공 상태 하위 컴포넌트. `useMemo(clampedIndex)` 훅이 조건부 렌더 이후에 오지 않도록 분리
+  - `packages/mobile/src/screens/ViewerScreen.tsx::handleMomentumScrollEnd` — 페이지 인덱스 추적 콜백
+  - `packages/mobile/src/screens/ViewerScreen.tsx::getItemLayout` — FlatList 성능 힌트(항목 폭 고정)
+  - `packages/mobile/src/screens/ViewerScreen.tsx::renderPage` — 일러스트 + 텍스트 레이아웃 렌더
+  - `packages/mobile/src/api/stories.ts::getStory` — GET /stories/{story_id}
+  - `packages/mobile/src/api/stories.ts::StoryDetailResponse/StoryPageDetail` — 뷰어 전용 와이어 타입(snake_case)
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — `Viewer` 라우트 시그니처 + `ViewerScreen` Stack.Screen 등록
+  - `packages/mobile/src/screens/GenerationScreen.tsx::storyId` state — S32 발견 이슈 해소
+  - `packages/mobile/src/screens/GenerationScreen.tsx::handleOpenBook` — Alert 임시 처리 → `navigation.reset([Home, Viewer])`
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts` 는 HTTP 조회 엔드포인트 형태를 정의하지 않음. 본 세션이 추가한 `StoryPageDetail`/`StoryDetailResponse` 와이어 타입은 모두 **백엔드 Pydantic 직렬화 형태를 따름**(snake_case). S30b/S31/S32 에서 이미 결정한 규약 유지.
+  - `StoryPageDetail.illustration_url` 은 optional nullable. 백엔드 `StoryPageResponse.illustration_url` 과 일치(S26 일러스트 파이프라인 완료 후 채워지며, 현재는 placeholder UI 로 대응).
+- **환경변수**: 추가 없음. `EXPO_PUBLIC_API_URL`(S28) 만 사용.
+- **의존 모듈 사용**:
+  - `apiFetch`, `ApiClientError` (S28 client.ts) — JWT 자동 첨부 + 에러 status/code 파싱
+  - `theme` (S28) — 디자인 토큰
+  - `RootStackParamList` — 라우트 타입(S28/S29/S30b/S31/S32 에서 누적 확장)
+  - 백엔드 `GET /api/v1/stories/{story_id}` (S20) — 뷰어가 호출하는 유일한 엔드포인트
+  - React Native `FlatList`/`Image`/`useWindowDimensions` — 페이지 넘기기 + 일러스트 렌더
+  - `navigation.reset` — Generation → Viewer 전환 시 스택 재구성
+
+### 다음 세션에 알려줄 것
+- **G4.5 리뷰 범위 확장** — 이제 프로필→목적→서술입력→미리보기→생성 진행→**그림책 열람** 까지 mobile 핵심 플로우가 완전 연결됨. G4.5 수동 리뷰를 이 5단계 E2E 로 돌릴 수 있음. 실제 LLM 호출에는 Claude API 키 + Gemini fallback 키가 필요하고, 일러스트는 S26 파이프라인 연결 전까지 placeholder(`🎨`) 로 표시됨.
+- **S34 (내 서재) 진입 시 할 일**:
+  1. `LibraryScreen` 신설 — `GET /api/v1/stories` (S20, `StoryListResponse`) 호출 → 카드 리스트 렌더. 각 카드 tap → `navigation.navigate("Viewer", { storyId })`.
+  2. `stories.ts` 에 `listStories({ limit, offset })` + `StoryListResponse`/`StoryListItem` 와이어 타입 추가. 본 세션의 `getStory` 와 동일 패턴.
+  3. `HomeScreen` 에서 "내 서재로" 버튼 추가 → `navigation.navigate("Library")`.
+  4. Viewer → 삭제 CTA 는 S34 범위. `DELETE /api/v1/stories/{id}` 엔드포인트는 백엔드에 아직 없음 — 필요 시 백엔드 TODO 로 기록 후 설계.
+- **발견된 이슈 (ViewerScreen 내부, 후속 정리)**:
+  - **스와이프 접근성** — `FlatList pagingEnabled` 만으로는 TalkBack/VoiceOver 사용자가 페이지를 이동하기 어려울 수 있음. S34 단계에서 "이전/다음" 보조 버튼 or `accessibilityActions` 를 헤더에 추가 검토.
+  - **긴 텍스트 스크롤** — 페이지 내부 ScrollView 로 본문을 스크롤하지만, 가로 스와이프와 제스처 충돌 가능성(특히 Android). 실기기 검증 필요(post-S35b).
+  - **이미지 로딩 상태** — `<Image>` 로딩 중 공백만 보임. placeholder background(primaryLight) 로 shift 는 최소화했지만, 진짜 스피너가 필요하다면 `onLoadStart/onLoadEnd` + 오버레이 ActivityIndicator 도입 검토.
+- **ViewerScreen 에서 `ViewerReady` 분리한 이유** — 초기에는 단일 컴포넌트 내부에 `useMemo(clampedIndex)` 를 두려 했으나, 로딩/에러 early return 이후에 훅이 오면 Rules of Hooks 위반. 성공 상태 렌더 블록을 별도 컴포넌트로 분리하여 훅이 항상 같은 순서로 호출되도록 보장. 이 패턴은 S34 LibraryScreen 에도 적용 가능(로딩/에러/empty/list 네 상태 분기 예상).
+- **`navigation.reset` 선택 이유** — S32 GenerationScreen 은 `headerBackVisible: false, gestureEnabled: false` 로 뒤로가기가 완전 차단된 화면. `navigation.navigate("Viewer", ...)` 로 Viewer 를 스택에 쌓으면 Viewer back 시 Generation(이미 완료된 상태) 화면으로 돌아가 사용자가 혼란. reset 으로 스택을 [Home, Viewer] 로 재구성해 "Viewer back = Home" 동작을 명확히 했다. 같은 패턴을 S34 Library → Viewer 에는 적용하지 않음(Library 는 back 가능해야 Library 로 돌아감).
+- **mobile jest 미복구 지속** — S29/S31/S32 와 동일. jest-expo@^52 ↔ expo@~54 mismatch. RTL 기반 뷰어 동작 테스트(폴링/탭 이벤트)가 필요하면 별도 인프라 태스크.
+
+### 변경된 파일 목록
+- `packages/mobile/src/screens/ViewerScreen.tsx` (신규, 약 400줄)
+- `packages/mobile/src/api/stories.ts` (확장: `StoryPageDetail`/`StoryDetailResponse`/`getStory` 추가)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (확장: `Viewer` 라우트 + Stack.Screen 등록)
+- `packages/mobile/src/screens/GenerationScreen.tsx` (수정: `storyId` state 승격 + `handleOpenBook` Alert → reset 교체 + `Alert` import 제거)
+
+---
+
+## S32 — 모바일 생성 중 로딩 UX (2026-04-11)
+
+### 완료된 것
+- **GenerationScreen** — `packages/mobile/src/screens/GenerationScreen.tsx`. Preview → Generation → (S33) Viewer 흐름의 네 번째 화면. PreviewScreen 확정 CTA 가 `navigation.navigate("Generation", { plan, childId, childName, style })` 로 전환.
+  - **라우트 파라미터**: `{ plan: ScenePlan; childId: string; childName: string; style: string }`. child 전체 정보는 `getProfile(childId)` 로 재조회(Preview 는 childId/childName 만 보유).
+  - **생성 시작 (마운트 시 1회)** — `useEffect` 내 `start()`:
+    1. `getProfile(childId)` → `ChildProfile`
+    2. `toChildInput(profile)` 로 `ChildInput` 매핑 (`id → child_id`, 나머지 동일)
+    3. `generateStory({ confirmed_plan: plan, child, style })` → `{job_id}` 202 응답
+    4. 폴링 루프 진입
+  - **폴링 루프** — `JOB_POLL_INTERVAL_MS = 1500` (stories.ts 상수) 간격으로 `getJobStatus(jobId)` 호출. `pollOnce` 가 재귀적으로 `setTimeout` 예약. 첫 폴링은 지연 없이 즉시(`await pollOnce(job_id)`) — 짧은 장면은 이미 1장이 생성되어 있을 수 있어 첫 피드백을 빠르게 제공.
+  - **종료 조건**: `status === "completed"` 또는 `"failed"` → 폴링 중단(`return`). 언마운트 시 `cancelled` flag + `clearTimeout` 으로 누수 방지.
+  - **장면 카드 등장 애니메이션** — `useRef(0)` 로 직전 `scenes.length` 추적. 폴링 응답에서 길이 증가가 감지되면 `LayoutAnimation.configureNext(LayoutAnimation.Presets.spring)` 호출 → React Native 가 다음 렌더의 레이아웃 변화를 스프링으로 보간. Android 가드: `UIManager.setLayoutAnimationEnabledExperimental(true)` 파일 로드 시 1회 호출.
+  - **진행 상태 카드**:
+    - ActivityIndicator + "{completed}/{total}장을 쓰고 있어요" (CLAUDE.md 톤 가이드 "이야기가 자라고 있어요 🌱")
+    - 진행률 바: `Math.round(completed/total * 100)` % 로 `progressBarFill` width 설정. 실패 시 `progressBarFailed` 색(error).
+    - `accessibilityLiveRegion="polite"` + `accessibilityLabel` 로 스크린리더에 진행률 공표.
+  - **상태별 헤더 카피**:
+    - `isBusy`: "이야기가 자라고 있어요 🌱"
+    - `isDone`: "이야기가 완성됐어요! 📖"
+    - `isFailed`: "잠깐, 다시 한번 해볼게요 😊"
+  - **하단 고정 CTA 상태 매핑**:
+    - 생성 중 → `primaryDisabled` "이야기를 만들고 있어요…" (disabled)
+    - 완료 → "그림책 열어보기" 버튼. onPress 는 **Alert + Home 복귀** 임시 처리(`TODO(S33): navigation.navigate("Viewer", { storyId })` 주석 위치 명시).
+    - 실패 → "처음으로" 버튼 (Home 복귀).
+  - **에러 매핑** — `handleApiError(err, stage)` 헬퍼로 `ApiClientError` 분기:
+    - 401 → "다시 로그인해주세요" (`TODO(post-S27)`)
+    - 404 (start) → "선택한 아이를 찾을 수 없어요" (profile 조회 실패)
+    - 404 (poll) → **"서버가 잠시 쉬어가고 있어요. 이야기를 다시 만들어볼까요?"** (인메모리 잡 매니저가 서버 재시작으로 잡을 잃은 케이스, 별도 안내)
+    - 422 → "이야기 설계가 조금 어긋났어요. 미리보기로 돌아가 주세요."
+    - 그 외 → "잠깐, 다시 한번 해볼게요 😊"
+    - 잡의 `status === "failed"` 인 경우 서버 `error` 필드를 그대로 노출(없으면 "이야기를 만드는 중 문제가 생겼어요.")
+  - **뒤로가기 차단** — Stack.Screen `options={{ headerBackVisible: false, gestureEnabled: false }}`. 생성 중 실수로 swipe back → 잡 고아 상태가 되는 것을 방지. 완료/실패 시에는 화면 내 CTA 로만 Home 복귀.
+- **stories API 클라이언트 확장** — `packages/mobile/src/api/stories.ts`:
+  - 상수: `JOB_POLL_INTERVAL_MS = 1500` (근거 주석 포함), 타입 `JobStatusValue = "pending" | "in_progress" | "completed" | "failed"` (백엔드 `JobStatus` Enum 과 동기).
+  - 와이어 타입: `ChildInput`, `GenerateStoryRequest`, `GenerateStoryResponse`, `GeneratedScene`, `JobStatusResponse` — 모두 백엔드 Pydantic 모델과 snake_case 1:1 매칭.
+  - 함수: `generateStory(input) → POST /stories/generate`, `getJobStatus(jobId) → GET /stories/jobs/{jobId}`. apiFetch 재사용으로 JWT 자동 첨부.
+  - `GeneratedScene.illustration_url` 은 optional nullable — S26 일러스트 파이프라인 완료 후 채워질 예정이며, 본 세션의 텍스트 흐름에서는 사용하지 않음.
+- **AppNavigator 확장** — `Generation` 라우트 타입 추가 + `GenerationScreen` import + `Stack.Screen` 등록. 라우트 순서: Home → ProfileForm → PurposeSelect → DescriptiveInput → Preview → **Generation** (뒤로가기 차단 옵션).
+- **PreviewScreen 교체** — `handleConfirm` 의 Alert 임시 처리(S31 TODO(S32) 위치)를 `navigation.navigate("Generation", { plan, childId, childName, style: preview.style })` 로 교체. S31 확정 CTA 의 미완성 엣지가 정리됨.
+- **TDD (RED → GREEN, 컴파일 타임)** — jest-expo 미복구 상태(S29/S31 에서 지적) 이므로 `npx tsc --noEmit` 기반 컴파일 타임 TDD 패턴 재사용:
+  1. RED: AppNavigator 에 `import { GenerationScreen } from "../screens/GenerationScreen"` + `Generation` 라우트 타입만 먼저 추가 → `npx tsc --noEmit` → `TS2307: Cannot find module '../screens/GenerationScreen'` 1건 실패 확인.
+  2. GREEN: stories.ts 확장 + GenerationScreen 작성 + Stack.Screen 등록 + PreviewScreen 교체 → `npx tsc --noEmit` → exit 0.
+  3. `RootStackParamList["Generation"]` 시그니처 + `generateStory`/`getJobStatus` 타입 매칭 덕분에 Preview → Generation 파라미터 전달과 API 호출 형태 모두 컴파일 타임 검증.
+- **백엔드 회귀 확인** — 본 세션이 백엔드를 건드리지 않았지만 smoke 차원에서 스토리 경로 회귀 실행: `pytest tests/test_s30a_plan_endpoint.py tests/test_s31a_plan_revise_endpoint.py tests/test_s19_story_api.py` → **39/39 통과**. `ruff check src/storytale/api/stories/router.py` → All checks passed.
+
+### SSE 대 폴링 결정 (중요)
+- **선택**: 폴링 (1.5초 간격).
+- **이유**:
+  1. React Native 기본 `fetch` 에 SSE 파서가 없음. 수신하려면 `react-native-sse` 같은 네이티브 의존성 도입 필요.
+  2. Expo managed workflow(현재 설정)는 네이티브 모듈 추가 시 prebuild/develop build 필요 → MVP 범위 초과.
+  3. 백엔드는 `GET /stories/jobs/{id}/stream` 과 `GET /stories/jobs/{id}` 둘 다 노출하므로, 클라이언트 전환 비용 없이 폴링으로 충분.
+  4. 1.5초 간격은 Claude API 가 한 장면(4~6문장)을 생성하는 체감 시간과 근접 → LayoutAnimation 스프링 등장이 끊김 없이 보임.
+- **이월**: S35/E2E 이후 실제 성능 측정 시 SSE 재검토. 인터페이스(`generateStory` + `getJobStatus`)는 SSE 로 바꿔도 GenerationScreen 의 state 흐름은 동일하게 유지 가능하도록 순수한 event-driven 구조로 작성.
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/mobile/src/screens/GenerationScreen.tsx::GenerationScreen` — 메인 컴포넌트
+  - `packages/mobile/src/screens/GenerationScreen.tsx::toChildInput` — `ChildProfile → ChildInput` 매핑 헬퍼 (파일 수준)
+  - `packages/mobile/src/screens/GenerationScreen.tsx::useEffect` 내 `start()`/`pollOnce()` — 생성 시작 + 폴링 루프
+  - `packages/mobile/src/screens/GenerationScreen.tsx::handleApiError` — 2단계(`"start"`/`"poll"`) 에러 분기
+  - `packages/mobile/src/api/stories.ts::generateStory` — POST /stories/generate
+  - `packages/mobile/src/api/stories.ts::getJobStatus` — GET /stories/jobs/{id}
+  - `packages/mobile/src/api/stories.ts::JOB_POLL_INTERVAL_MS` — 폴링 간격 상수(1500)
+  - `packages/mobile/src/api/stories.ts::JobStatusValue` — 백엔드 `JobStatus` Enum 미러
+  - `packages/mobile/src/api/stories.ts::ChildInput/GenerateStoryRequest/GenerateStoryResponse/GeneratedScene/JobStatusResponse` — 신규 와이어 타입
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — `Generation` 라우트 시그니처 + `GenerationScreen` 등록(`headerBackVisible: false` + `gestureEnabled: false`)
+  - `packages/mobile/src/screens/PreviewScreen.tsx::handleConfirm` — Alert 임시 처리 → `navigation.navigate("Generation", ...)` 교체
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts` 는 HTTP 엔드포인트 형태를 정의하지 않음. 본 세션이 추가한 `GenerateStoryRequest/Response`, `JobStatusResponse`, `GeneratedScene` 와이어 타입은 모두 **백엔드 Pydantic 직렬화 형태를 따름**(snake_case). 컨트랙트 TypeScript 인터페이스와 다름(S30b/S31 에서 이미 결정한 규약 유지).
+  - `GeneratedScene.illustration_url` 은 optional nullable. 백엔드 `_run_generation` 은 현재 텍스트만 저장하고 일러스트 URL 은 S26 완료 이후에 별도 파이프라인이 갱신. 본 화면은 URL 의 존재 여부와 무관하게 동작(URL 이 없어도 textCard 는 정상 렌더).
+  - `ChildInput` 의 `comfort_object/friend_name/favorite_animal` 은 백엔드 `str | None` 매칭. `toChildInput` 에서 `?? null` 로 undefined 를 null 로 강제 — JSON 직렬화 시 백엔드 Pydantic 이 `Optional[str]` 을 허용하도록 유지.
+- **환경변수**: 추가 없음. `EXPO_PUBLIC_API_URL`(S28) 만 사용.
+- **의존 모듈 사용**:
+  - `apiFetch`, `ApiClientError` (S28 client.ts, S30b parseErrorBody 개선) — JWT 자동 첨부 + 에러 code 파싱
+  - `getProfile` (S28 profiles.ts) — child 전체 정보 재조회
+  - `theme` (S28) — 디자인 토큰
+  - `RootStackParamList` — 라우트 타입(S28/S29/S30b/S31 에서 누적 확장)
+  - 백엔드 `POST /api/v1/stories/generate` (S19) + `GET /api/v1/stories/jobs/{id}` (S19) — 본 화면의 두 엔드포인트
+  - `LayoutAnimation`, `UIManager` (React Native 표준) — 장면 카드 스프링 등장
+
+### 다음 세션에 알려줄 것
+- **G4.5 리뷰 범위 확장** — 이제 프로필→목적→서술입력→미리보기→**생성 진행** 까지 mobile 핵심 플로우가 연결됨. G4.5 수동 리뷰 시 생성 진행 UX 가 자연스러운지도 함께 검증 가능. 실제 LLM 호출에는 Claude API 키 + Gemini fallback 키가 필요.
+- **S33 (그림책 뷰어) 진입 시 할 일**:
+  1. `ViewerScreen` 신설 — 라우트 `{ storyId: string }`. `GET /api/v1/stories/{id}` (S20) 호출 → `StoryDetailResponse` → 페이지 목록 렌더.
+  2. GenerationScreen `handleOpenBook` 의 Alert 임시 처리(`// TODO(S33)` 주석 위치)를 `navigation.navigate("Viewer", { storyId: ??? })` 로 교체. **단, 현재 폴링 state 에는 `story_id` 가 있지만 GenerationScreen 에서 `story_id` 를 state 로 보관하지 않음** — `snapshot.story_id` 를 state 로 승격하거나 `handleOpenBook` 클로저에 넘겨야 함. 아래 "발견된 이슈" 참조.
+  3. GenerationScreen 의 `GeneratedScene` 타입은 현재 `text` 만 리스트에 쓰고 `illustration_prompt` 는 무시. S33 에서는 Viewer 전용 타입을 `stories.ts` 에 별도로 추가하는 편이 깔끔(현재 `GeneratedScene` 는 "생성 진행 중 미리보기" 용도로 최소화).
+- **발견된 이슈 (GenerationScreen 내부, 후속 정리)**:
+  - **`story_id` state 누락** — `pollOnce` 가 `snapshot.story_id` 를 사용하지 않음. S33 진입 시 뷰어에 넘기려면 state 추가 필요. 현재는 "그림책 열어보기" 가 Alert + Home 복귀 임시 처리이므로 문제되지 않지만, S33 구현 시 **최초 수정 대상**.
+  - **재시도 CTA 부재** — 실패 시 "처음으로" 만 제공. "다시 해볼게요" (`navigation.replace("Generation", { ... })`) 도 UX 로 고려해볼 것. 본 세션에서는 서버 에러 원인 분류가 UI 에 없어 무한 재시도 루프 가능성 때문에 보류.
+  - **폴링 타임아웃 없음** — 서버가 아주 느리거나 무한 pending 상태에 빠지면 클라이언트도 끝없이 폴링. 최대 30회(45초) 같은 상한을 두는 것이 안전. 현재 MVP 범위 초과로 보류.
+- **SSE 전환 트리거** — 폴링이 1.5초 간격이라 최악의 경우 장면 완료 후 1.5초 지연. 실제 LLM 생성 속도 대비 보통 1초 내외로 충분하지만, 더 빠른 피드백이 필요하다고 판단되면 `react-native-sse` 도입 + Expo development build 전환 검토. 현재 인터페이스는 SSE 로 바꿔도 GenerationScreen 의 state 흐름(scenes/status/total/completed)은 그대로 유지 가능.
+- **Android LayoutAnimation 가드 위치** — 파일 로드 시 1회(`if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental)` 블록)만 호출. React Native 0.74+ / Expo 54+ 에서 더 이상 필요 없을 수 있으나, 제거 전 실기기 검증 필요(특히 Fabric 활성화 여부).
+- **mobile jest 미복구 지속** — S29/S31 과 동일. jest-expo@^52 ↔ expo@~54 mismatch. RTL 기반 폴링 동작 테스트가 필요하면 별도 인프라 태스크.
+- **컨트랙트 정합성 정리(여전히 이월)** — `contracts/story-engine.ts::PreviewLoop` 의 `revisionCount` 보강 + 글로벌 핸들러 에러 포맷 불일치.
+
+### 변경된 파일 목록
+- `packages/mobile/src/screens/GenerationScreen.tsx` (신규 — 메인 화면 + 폴링 + 애니메이션)
+- `packages/mobile/src/api/stories.ts` (수정 — `JOB_POLL_INTERVAL_MS`, `JobStatusValue`, `ChildInput`, `GenerateStoryRequest/Response`, `GeneratedScene`, `JobStatusResponse`, `generateStory`, `getJobStatus` 추가)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (수정 — `Generation` 라우트 타입 + Stack.Screen 등록 + back 차단 옵션)
+- `packages/mobile/src/screens/PreviewScreen.tsx` (수정 — `handleConfirm` Alert → navigation.navigate("Generation", ...))
+- `docs/SESSION_LOG.md` (수정 — 본 항목 추가)
+- `docs/TASK_BACKLOG.md` (수정 — S32 [완료])
+- `docs/PROGRESS.md` (수정 — Phase 6 8/9 + 현재 위치 + 차단 갱신)
+
+---
+
+## S31 — 모바일 미리보기/수정 UI (2026-04-11)
+
+### 완료된 것
+- **PreviewScreen** — `packages/mobile/src/screens/PreviewScreen.tsx`. DescriptiveInput → Preview → (S32) Generation 흐름의 세 번째 화면. S30b `createStoryPlan` 응답(`plan` + `preview`)을 route params로 받아 요약/장면 하이라이트/수정 입력/확정 CTA 를 표시.
+  - **route params**: `{ plan: ScenePlan; preview: StoryPreview; childId: string; childName: string }`. `plan/preview`는 초기값이고 revise 응답으로 local state 가 덮어써진다. `childId` 는 `revisePlan` 호출에 필요, `childName` 은 chip 에만 사용(DB 재조회 없이 S30b 에서 그대로 전달).
+  - **수정 루프** — `feedback` TextInput (1~500자, S30b 와 동일한 카운터/오버 경고 패턴). "이렇게 바꿔주세요" 버튼 → `revisePlan({ current_plan, feedback, revision_count, child_id })` → 응답의 `plan/preview/revision_count` 로 state 일괄 갱신 + feedback 비움.
+  - **수정 카운터 UI** — 우상단 `revisionBadge` "수정 N/3". `revisionCount === 3` 이면 입력/버튼 블록 전체를 `lockedCard` 로 교체("수정은 3회까지 가능해요. 이제 이야기를 만들어볼까요?"). 백엔드 400 `MAX_REVISIONS_EXCEEDED` 응답도 동일 안내로 매핑(이중 안전망).
+  - **확정 CTA (S32 임시)** — 하단 고정 `primaryButton` "이 이야기로 만들기". S32(생성 중 로딩) 가 아직 없으므로 Alert 로 "만들기/조금 더 볼게요" 2지 확인 → Home 복귀. `// TODO(S32): navigation.navigate("Generation", ...)` 주석으로 교체 지점 명시.
+  - **에러 매핑**:
+    - 400 + `code === MAX_REVISIONS_EXCEEDED_CODE` → "수정은 여기까지예요" + "지금 이야기를 그대로 만들어볼까요?"
+    - 400 + `code === REJECTED_INTENT_CODE` → "이 수정은 함께 만들기 어려워요" + 서버 메시지
+    - 401 → "다시 로그인해주세요" (Login 화면 미구현, `TODO(post-S27)` 주석)
+    - 404 → "선택한 아이를 찾을 수 없어요"
+    - 422 → "1~500자 사이로 적어주세요"
+    - 그 외 → "잠깐, 다시 한번 해볼게요 😊"
+  - **로딩 카피** — revise 중에는 ActivityIndicator + "이야기를 다듬고 있어요 ✨" (CLAUDE.md 톤 가이드 적용).
+- **stories API 클라이언트 확장** — `packages/mobile/src/api/stories.ts`:
+  - `revisePlan({ current_plan, feedback, revision_count, child_id })` 함수 + 응답 타입 `PlanRevisionResponse { plan, preview, revision_count }`.
+  - 요청 타입 `PlanRevisionRequest` 는 백엔드 Pydantic `PlanRevisionRequest` 와 snake_case 1:1 매칭.
+  - 상수 `MAX_REVISIONS = 3 as const`, `MAX_REVISIONS_EXCEEDED_CODE = "MAX_REVISIONS_EXCEEDED" as const` export. 전자는 백엔드 `InterpreterOrchestrator.MAX_REVISIONS` 와 반드시 동기화 필요(주석 명시).
+- **AppNavigator 확장** — `Preview` 라우트 타입 및 스크린 등록 추가. `RootStackParamList["Preview"]` 타입 시그니처로 DescriptiveInput → Preview 네비게이션 호출이 컴파일 타임에 검증됨.
+- **DescriptiveInputScreen 교체** — `handleSubmit` 의 `Alert.alert(...)` 임시 처리(`// TODO(S31)` 주석 위치)를 `navigation.navigate("Preview", { plan, preview, childId, childName })` 로 교체. S30b 의 미완성 엣지가 정리됨.
+- **client.ts 무수정** — `parseErrorBody` 는 S30b 에서 이미 inner `code` 추출을 지원하므로 `MAX_REVISIONS_EXCEEDED` 분기를 위해 추가 수정 불필요. `ApiClientError.code` 로 그대로 노출된다.
+- **TDD (RED → GREEN, 컴파일 타임)** — jest-expo 미복구 상태이므로 S29/S30b 와 동일한 패턴:
+  1. RED: AppNavigator 에 `import { PreviewScreen } from "../screens/PreviewScreen"` + `Preview` 라우트 타입만 먼저 추가 → `npx tsc --noEmit` → `TS2307: Cannot find module '../screens/PreviewScreen'` 1건 실패 확인.
+  2. GREEN: 화면/API/네비게이션 구현 → `npx tsc --noEmit` → exit 0.
+  3. `RootStackParamList["Preview"]` 시그니처 + `revisePlan`/`createStoryPlan` 타입 매칭 덕분에 DescriptiveInput → Preview 파라미터 전달, PreviewScreen → revisePlan 호출 인자 모두 컴파일 타임 검증.
+- **백엔드 회귀 확인** — `pytest tests/test_s30a_plan_endpoint.py tests/test_s31a_plan_revise_endpoint.py` → **28/28 통과**. 본 세션이 백엔드를 건드리지 않았으므로 회귀는 자명하지만 Integration smoke 로 확인.
+
+### 구현 요약
+- **주요 클래스/파일**:
+  - `packages/mobile/src/screens/PreviewScreen.tsx::PreviewScreen` — 메인 화면 컴포넌트
+  - `packages/mobile/src/screens/PreviewScreen.tsx::handleRevise` — `revisePlan` 호출 + state 일괄 갱신
+  - `packages/mobile/src/screens/PreviewScreen.tsx::handleConfirm` — S32 임시 Alert
+  - `packages/mobile/src/screens/PreviewScreen.tsx::handleApiError` — MAX_REVISIONS_EXCEEDED + S30b 에러 매핑 재사용
+  - `packages/mobile/src/api/stories.ts::revisePlan` — `POST /stories/plan/revise` 호출
+  - `packages/mobile/src/api/stories.ts::MAX_REVISIONS`, `MAX_REVISIONS_EXCEEDED_CODE` — 백엔드 상수 동기화
+  - `packages/mobile/src/api/stories.ts::PlanRevisionRequest/Response` — 와이어 타입(snake_case)
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — `Preview` 라우트 시그니처 + 등록
+  - `packages/mobile/src/screens/DescriptiveInputScreen.tsx::handleSubmit` — Alert 임시 처리 → `navigation.navigate("Preview", ...)` 교체
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts::PreviewLoop` 인터페이스는 `revisionCount` 필드를 정의하지 않음. 본 세션에서 클라이언트-서버 모두 `revision_count` 필드를 사용하는 것으로 실질적으로 컨트랙트를 확장했으나, 컨트랙트 파일 자체는 건드리지 않음(별도 정리 태스크 이월 — S31a 메모에서 언급).
+  - mobile `ScenePlan/StoryPreview` 와이어 타입은 camelCase 가 아닌 snake_case(S30b 결정 유지). 본 세션에서 `PlanRevisionRequest/Response` 도 동일 규약으로 추가.
+  - `childName` 이 route params 에 포함되는 것은 mobile 전용 최적화 — 백엔드 API 는 `child_id` 만 받고 소유자 검증 후 DB 에서 이름을 가져오므로 API 계약에는 영향 없음. Preview chip 이 DB 재조회 없이 S30b 에서 이미 가지고 있던 `profileState.child.name` 을 그대로 전달.
+- **환경변수**: 추가 없음.
+- **의존 모듈 사용**:
+  - `apiFetch`, `ApiClientError` (S28 client.ts, S30b 에러 파서 개선) — 자동 auth + inner code 추출
+  - `theme` (S28) — 디자인 토큰
+  - `RootStackParamList` — 라우트 타입(S28/S29/S30b 에서 누적 확장)
+  - 백엔드 `POST /api/v1/stories/plan/revise` (S31a) — 본 화면이 호출하는 유일한 신규 엔드포인트
+  - `createStoryPlan`/`PARENT_TEXT_MAX_LENGTH`/`REJECTED_INTENT_CODE` (S30b) — 에러 매핑 재사용
+
+### 다음 세션에 알려줄 것
+- **G4.5 수동 리뷰 가능** — 이제 프로필→목적→서술입력→미리보기→(수정 루프)→확정 까지 핵심 플로우가 모두 mobile 에 존재. 백엔드 LLM 호출이 실제로 필요하므로 G4.5 리뷰에는 Claude API 키 + Gemini fallback 키가 있는 `.env` 가 필요. `packages/backend/docs/env-example.md` 참고(없으면 `packages/backend/.env.example` 확인).
+- **S32 진입 시 할 일**:
+  1. `GenerationScreen` 신설 — 라우트 `{ plan: ScenePlan; childId: string; style: IllustrationStyle }`. PreviewScreen 의 `handleConfirm` 의 임시 Alert(`// TODO(S32)` 주석 위치)를 `navigation.navigate("Generation", { plan, childId, style: preview.style })` 로 교체.
+  2. `POST /api/v1/stories/generate` (S19) 호출 → 202 + `jobId` 수신 → `GET /stories/jobs/{jobId}/stream` SSE 구독 → 장면 완료마다 UI 갱신.
+  3. React Native 에서 SSE: `react-native-sse` 또는 `EventSource` 폴리필 필요(네이티브 `fetch` 는 SSE 파서 없음). 또는 `GET /stories/jobs/{jobId}` 를 폴링(간단하지만 1~2초 지연).
+  4. `confirmed_plan` 전달 형식: `POST /stories/generate` 는 `ConfirmedPlan` 를 받는 형태(S19 메모 참고 — 현재 라우터는 `GenerateStoryRequest { confirmed_plan, child, style }`). `plan + child_id + style` 을 그대로 전달.
+- **PreviewScreen 폴리시 — "수정 입력 중 확정"**:
+  - 현재 스펙: 수정 입력 중(feedback 비어있지 않고 수정 버튼 안 누른 상태)에도 하단 "이 이야기로 만들기" 버튼은 활성화 상태. 확정 시 현재 plan(수정 안 된 원본 또는 직전 revise 결과)으로 진행됨. 의도된 동작(부모가 입력을 망설여도 원래대로 확정 가능)이지만, "아 수정하려던 거 사라졌네?" 혼선 가능. 후속 UX 리뷰에서 결정.
+- **revise 중 race** — revise 중(`revising === true`)에도 "이 이야기로 만들기" 버튼은 `primaryDisabled` 스타일로 표시만 dim 되고 로직상 `disabled={revising}` 으로 차단. 수정 반영 전 확정 버그 방지.
+- **DEFAULT_PREVIEW_STYLE 결정(여전히 이월)** — S30a/S31a 모두 `style="watercolor"` 하드코딩. S31 PreviewScreen 은 서버 응답의 `preview.style` 을 그대로 chip 으로 노출만 하고 부모가 바꿀 방법은 없음. 스타일 선택 UX 는 후속 태스크(S32 라 가정 시 시간이 늦어짐 — 별도 task 권장).
+- **컨트랙트 정합성 정리(S31a 로부터 이월)** — `contracts/story-engine.ts::PreviewLoop` 에 `revisionCount`/`MaxRevisionsError` 타입 보강 필요. `api-conventions.md` ↔ 글로벌 핸들러 에러 포맷 불일치도 여전히 미해결.
+- **mobile jest 미복구 지속** — jest-expo@^52 ↔ expo@~54 mismatch (S29 메모). S31 도 컴파일 타임 타입 체크 + tsc 만으로 검증. RTL 기반 상호작용 테스트가 필요하면 별도 인프라 태스크.
+
+### 변경된 파일 목록
+- `packages/mobile/src/screens/PreviewScreen.tsx` (신규 — 메인 화면)
+- `packages/mobile/src/api/stories.ts` (수정 — `revisePlan` 함수, `PlanRevisionRequest/Response`, `MAX_REVISIONS`, `MAX_REVISIONS_EXCEEDED_CODE` 추가)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (수정 — `Preview` 라우트 타입 + 스크린 등록)
+- `packages/mobile/src/screens/DescriptiveInputScreen.tsx` (수정 — `handleSubmit` 의 Alert → navigation.navigate("Preview", ...))
+- `docs/SESSION_LOG.md` (수정 — 본 항목 추가)
+- `docs/TASK_BACKLOG.md` (수정 — S31 [완료])
+- `docs/PROGRESS.md` (수정 — Phase 6 7/9 + 현재 위치 + 차단 갱신)
+
+---
+
+## S31a — 백엔드 plan/revise 엔드포인트 (2026-04-11)
+
+### 완료된 것
+- **S31 분할 결정 (S30 → S30a/S30b 패턴 재사용)** — S31("미리보기 & 수정 UI")의 산출물에 "수정 입력 → 백엔드 호출"이 포함되어 있으나, 호출 대상인 `POST /stories/plan/revise`가 라우터에 노출되어 있지 않았음. `InterpreterOrchestrator.revise_plan()`은 S14/S16에서 구현돼 있으나 HTTP 라우터로 미연결 상태. CLAUDE.md 규칙(모듈 격리 + 5파일 한도)에 따라 S31을 **S31a (백엔드)** + S31 (모바일) 로 분할해 백엔드 분할을 먼저 처리.
+- **POST /api/v1/stories/plan/revise 엔드포인트** — `packages/backend/src/storytale/api/stories/router.py`에 추가:
+  - 요청: `PlanRevisionRequest { current_plan: ScenePlan, feedback: 1~500자, revision_count: int>=0, child_id: str }`. 와이어 형식은 S30a `PlanStoryResponse`에서 받은 `plan` 필드를 그대로 보내면 되도록 동일한 ScenePlan 직렬화.
+  - 응답: `PlanRevisionResponse { plan: ScenePlan, preview: StoryPreview, revision_count: int }`. `revision_count`는 이번 호출이 끝난 후의 누적 카운트(요청값 + 1)로, 클라이언트는 이 값을 다음 호출의 `revision_count`로 그대로 전달하면 된다.
+  - 인증: JWT 필수 (`CurrentUserDep`), 라우트 등록은 `/plan` 바로 아래에 배치(가독성).
+  - 소유자 검증: S30a의 `_load_owned_child_profile()` 헬퍼 재사용 → child_id UUID 변환 + 소유자 일치 + 미존재/타인소유/UUID오류 모두 404로 통일. 소유자 검증은 미리보기에 사용할 `child_name`을 안전하게 가져오기 위함.
+  - 호출 흐름: `orchestrator.revise_plan(plan=current_plan, feedback=feedback)` → `orchestrator.get_preview(plan=revised, style=DEFAULT_PREVIEW_STYLE, child_name=profile.name)`.
+  - **revise 횟수 한도(MAX_REVISIONS=3) 검증을 라우터 레벨로 끌어올림.** 요청 처리 첫 단계에서 `request.revision_count >= MAX_REVISIONS`이면 400 + `detail={"message": f"수정은 최대 {MAX_REVISIONS}회까지 가능해요.", "code": "MAX_REVISIONS_EXCEEDED"}`. 오케스트레이터는 호출되지 않음(LLM 비용 절약 + 빠른 실패).
+  - 에러 매핑: 일반 예외 → 500 + 부드러운 한국어 메시지. `HTTPException`은 그대로 통과(404/422 재발생 방지).
+
+### revise_count 추적 방식 결정 (중요)
+- **결정**: 클라이언트 카운터 + 서버 검증.
+- **이유**: `InterpreterOrchestrator._revision_count`는 인스턴스 상태인데, 라우터 의존성 `get_story_orchestrator()`가 매 요청마다 새 `InterpreterOrchestrator`를 생성하므로 `_revision_count`는 항상 0으로 시작 → 한도 검증이 무력화돼 있는 사실상 데드 코드. SESSION_LOG S30a/S30b에서 이미 지적된 사항.
+- **선택지 검토**:
+  1. 서버 잡 상태(Redis 또는 DB) — 도입 비용이 크고 MVP 범위 초과. Phase 7에서 Redis 도입 시 함께 처리하는 것이 자연스러움.
+  2. 라우터 레벨 stateless 검증(채택) — 클라이언트가 `revision_count`를 보내고 라우터가 한도 검증. 신뢰 모델: 악의적 클라이언트가 카운터를 거짓 보고해도 손해는 본인 LLM 비용뿐이고, 정직한 클라이언트는 한도가 정확히 적용됨. S30a의 stateless 패턴과 일관.
+  3. `InterpreterOrchestrator.revise_plan` 시그니처에 `revision_count` 추가 — 다른 모듈을 수정해야 하고 기존 테스트에 파급. CLAUDE.md 규칙(다른 모듈 수정 시 멈추고 보고)에 따라 보류.
+- **부수 효과**: `InterpreterOrchestrator._revision_count` 인크리먼트는 여전히 존재하지만 호출 결과에 영향을 주지 않는 데드 상태가 된다. 깔끔한 정리(인스턴스 상태 제거)는 별도 청소 태스크 권장 — 본 세션에서는 라우터 검증이 사실상의 단일 진실 공급원임.
+
+### TDD (RED → GREEN)
+- **RED 단계**: `tests/test_s31a_plan_revise_endpoint.py` 작성 후 `pytest -x` 실행 → 첫 happy path가 `404 Not Found` (라우트 미존재)로 실패. RED 신호 명확히 확인.
+- **GREEN 단계**: 라우터에 `PlanRevisionRequest/Response` + `plan_revise` 핸들러 + `MAX_REVISIONS` 임포트 추가. pytest 15/15 통과.
+- **회귀 확인**: `tests/test_s30a_plan_endpoint.py` (13) + `tests/test_s31a_plan_revise_endpoint.py` (15) + `tests/test_s19_story_api.py` + `tests/test_s20_story_storage.py` + `tests/test_s16_interpreter_orchestrator.py` + `tests/test_s18_story_orchestrator.py` 합산 84 passed / 1 skipped.
+- **린트/포맷**: ruff check 통과, ruff format 적용.
+
+### 구현 요약
+- **주요 클래스/함수**:
+  - `packages/backend/src/storytale/api/stories/router.py::PlanRevisionRequest` — Pydantic, current_plan/feedback(1~500)/revision_count(>=0)/child_id
+  - `packages/backend/src/storytale/api/stories/router.py::PlanRevisionResponse` — `{plan, preview, revision_count}`
+  - `packages/backend/src/storytale/api/stories/router.py::plan_revise()` — POST /stories/plan/revise 핸들러. 한도 → 소유자 → revise → preview 순서.
+  - 재사용: `_load_owned_child_profile()`, `DEFAULT_PREVIEW_STYLE`, `PARENT_TEXT_MAX_LENGTH` (모두 S30a에서 도입)
+  - 임포트 추가: `from storytale.interpreter.interpreter_orchestrator import MAX_REVISIONS`
+- **라우트 등록 순서**: `/plan` → `/plan/revise` → `/generate` → `/jobs/...` → `""` (목록) → `/{story_id}`. POST 끼리는 path가 다르므로 충돌 없음.
+- **계약 대비 변경점**:
+  - `contracts/story-engine.ts`에는 HTTP 엔드포인트 정의 없음. 본 엔드포인트는 `StoryOrchestrator.revise_plan()` + `getPreview()` 두 단계를 합쳐 한 번에 노출(라운드트립 1회).
+  - `contracts/story-engine.ts::PreviewLoop` 인터페이스는 클라이언트가 호출하는 형태로 정의돼 있고 `revisionCount` 필드는 명시되지 않음. 본 엔드포인트는 응답에 `revision_count`를 포함시켜 stateless flow를 가능하게 함 — 컨트랙트 보강 필요(별도 정리 태스크 권장).
+  - 글로벌 핸들러(`storytale/app.py::custom_http_exception_handler`)가 모든 HTTPException을 `{"error": {"code", "message"}}`로 래핑. detail에 dict를 넘기면 그 dict가 `error.message` 자리에 들어감 → 클라이언트는 `body.error.message.code === "MAX_REVISIONS_EXCEEDED"`로 구분. (S30a `REJECTED_INTENT`와 동일 패턴.)
+- **환경변수**: 추가 없음.
+- **의존 모듈 사용**:
+  - `StoryOrchestrator.revise_plan()` (S18 → S14/S16) — 메서드 위임
+  - `StoryOrchestrator.get_preview()` (S18 → S15) — 미리보기 재생성
+  - `MAX_REVISIONS` (S16 interpreter_orchestrator) — 한도 상수 단일 공급원
+  - `ChildProfile` (S3 DB 모델) — 소유자 검증
+  - `StoryPreview`, `ScenePlan` — 응답 모델
+  - `CurrentUserDep` (S27) — JWT 인증
+  - `get_db` (S3) — DB 세션
+
+### 다음 세션에 알려줄 것
+- **S31 (모바일 미리보기/수정 UI) 진입 시 할 일**:
+  1. **PreviewScreen 신설** — 라우트 파라미터 `{ plan: ScenePlan; preview: StoryPreview; childId: string }`. S30b의 `Alert.alert(...)` 임시 처리(`// TODO(S31)` 주석 위치)를 `navigation.navigate("Preview", { plan, preview, childId })`로 교체. ScenePlan/StoryPreview 와이어 타입은 `packages/mobile/src/api/stories.ts`에 이미 정의됨 → 그대로 재사용.
+  2. **`stories.ts`에 `revisePlan()` 추가** — `apiFetch<PlanRevisionResponse>("/stories/plan/revise", { method: "POST", body })`. 응답 타입 `PlanRevisionResponse { plan, preview, revision_count }`. 백엔드 와이어와 1:1 매칭(snake_case). 클라이언트는 화면 상태에 `revisionCount` 변수를 두고 매 호출마다 응답값으로 갱신.
+  3. **수정 입력 + 한도 안내** — 부모 텍스트 입력(최대 500자, S30b 카운터 패턴 재사용). `revisionCount === 3`이면 입력 disabled + "수정은 3회까지 가능해요" 안내. 백엔드 400(`MAX_REVISIONS_EXCEEDED`) 응답도 동일한 안내로 매핑(이중 안전망).
+  4. **에러 매핑 추가** — `client.ts::parseErrorBody`는 이미 inner code 추출을 지원하므로(S30b), `error.code === "MAX_REVISIONS_EXCEEDED"` 분기만 추가하면 됨. 그 외에는 S30b 패턴(401/404/500 부드러운 한국어) 재사용.
+  5. **확정 버튼** — "이 이야기로 만들기" CTA → `navigation.navigate("Generation", { plan, child })` 또는 직접 `/stories/generate` 호출 후 `Generation` 화면으로. 확정 시 사용할 엔드포인트(`POST /stories/generate`)는 S19에서 이미 노출돼 있음 → child 정보(child_id, child profile)와 confirmed_plan + style을 전달.
+  6. **child picker 도입 검토** — S30b는 첫 프로필 자동 선택. PreviewScreen 또는 PurposeSelect 위에 picker 추가 검토(S30b 메모에서 이월).
+- **`InterpreterOrchestrator._revision_count` 데드 코드** — 본 세션에서는 라우터 검증으로 우회만 했고 인스턴스 상태 자체는 그대로 둠. 다른 모듈 수정은 별도 청소 태스크에서:
+  - 옵션 A: `_revision_count` 필드 + 인크리먼트 + 내부 한도 체크 모두 제거하고 `MAX_REVISIONS` 상수만 export로 남김. 기존 `tests/test_s16_interpreter_orchestrator.py`의 `MaxRevisionsError` 검증 케이스가 있다면 제거 또는 수정 필요.
+  - 옵션 B: 시그니처에 `revision_count: int` 인자를 추가하고 라우터에서 전달. 더 엄격하지만 API 계약 변경 폭이 큼.
+- **DEFAULT_PREVIEW_STYLE 결정 이월(여전히 미해결)** — S30a/S31a 모두 `style="watercolor"` 하드코딩. S31에서 부모가 스타일을 명시적으로 선택할지(별도 화면/토글) 결정 필요. 스타일만 바꾸는 미리보기 재요청 엔드포인트가 있어야 한다면 S31b로 또 분할될 수 있음. 현재 MVP 흐름은 "수정 = 텍스트 피드백"으로 좁혀 두는 것이 단순함.
+- **컨트랙트 정합성 정리(이월)** — `contracts/story-engine.ts::PreviewLoop`에 `revisionCount` 필드/한도/`PreviewLoopError` 타입 보강이 필요. `api-conventions.md`의 에러 형식(`{detail, code}`)과 글로벌 핸들러의 `{error: {code, message}}` 형식 불일치도 여전히 미해결(S30a/S30b 메모 참조).
+
+### 변경된 파일 목록
+- `packages/backend/src/storytale/api/stories/router.py` (수정 — `MAX_REVISIONS` import, `PlanRevisionRequest/Response` 모델, `plan_revise` 핸들러)
+- `packages/backend/tests/test_s31a_plan_revise_endpoint.py` (신규 — 15 테스트)
+- `docs/TASK_BACKLOG.md` (수정 — S31a [완료] + S31 의존성 갱신)
+- `docs/SESSION_LOG.md` (수정 — 본 항목 추가)
+- `docs/PROGRESS.md` (수정 — Phase 6 진행률 6/9 + 현재 위치 + 차단 갱신)
+
+---
+
 ## S30b — 모바일 서술형 입력 UI (2026-04-11)
 
 ### 완료된 것

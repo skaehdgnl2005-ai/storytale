@@ -208,24 +208,13 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
         child_id: profileState.child.id,
       });
 
-      // TODO(S31): navigation.navigate("Preview", { plan, preview }) 로 교체.
-      // 현재 Preview 화면 미구현 → Alert 으로 결과 요약을 보여주고 Home 복귀.
-      Alert.alert(
-        "이야기 설계가 완성됐어요! 📖",
-        [
-          result.preview.title,
-          "",
-          result.preview.summary,
-          "",
-          ...result.preview.scene_highlights,
-        ].join("\n"),
-        [
-          {
-            text: "확인",
-            onPress: () => navigation.popToTop(),
-          },
-        ],
-      );
+      // S31: Preview 화면으로 plan + preview 전달.
+      navigation.navigate("Preview", {
+        plan: result.plan,
+        preview: result.preview,
+        childId: profileState.child.id,
+        childName: profileState.child.name,
+      });
     } catch (err) {
       handleApiError(err);
     } finally {

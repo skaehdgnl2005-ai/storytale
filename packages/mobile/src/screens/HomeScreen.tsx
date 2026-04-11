@@ -28,6 +28,15 @@ export const HomeScreen: React.FC<Props> = ({ navigation }) => {
       >
         <Text style={styles.startButtonText}>이야기 만들기</Text>
       </Pressable>
+
+      <Pressable
+        style={styles.libraryButton}
+        onPress={() => navigation.navigate("Library")}
+        accessibilityLabel="내 서재 열기"
+        accessibilityRole="button"
+      >
+        <Text style={styles.libraryButtonText}>내 서재</Text>
+      </Pressable>
     </View>
   );
 };
@@ -88,5 +97,21 @@ const styles = StyleSheet.create({
     fontFamily: "Pretendard-Bold",
     fontSize: 17,
     color: theme.colors.primary,
+  },
+  // S34 — 내 서재 진입. 아웃라인 보다 약한 텍스트 버튼으로 1차/2차 CTA 와 시각적
+  // 우선순위를 낮춰 첫 사용자에게 "프로필 만들기 → 이야기 만들기" 흐름을 유도한다.
+  libraryButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  libraryButtonText: {
+    fontFamily: "Pretendard-SemiBold",
+    fontSize: 15,
+    color: theme.colors.textSecondary,
+    textDecorationLine: "underline",
   },
 });

@@ -289,33 +289,54 @@
 - **의존성**: S29, S30a
 - **검증**: `npx tsc --noEmit` 통과 + S30a 백엔드 회귀 13/13 통과 + 컴파일 타임 어서션(`Record<PurposeId, PurposeGuide>` 4종 강제, `purpose_category: PurposeId` 1:1 매핑)
 
-### S31 — 미리보기 & 수정 UI [대기]
-- **산출물**: 요약 카드, 수정 입력, 최대 3회 루프, 확정 버튼
-- **의존성**: S30b
-- **선결 조건 (S31a 후보)**: `POST /stories/plan/revise` (또는 동등) 백엔드 엔드포인트 — 현재 라우터에 노출되어 있지 않음. InterpreterOrchestrator.revise_plan()은 구현되어 있으나 HTTP 라우터로 미연결. S30a와 같은 분할 패턴으로 처리 권장.
+### S31a — 백엔드 plan/revise 엔드포인트 [완료]
+- **산출물**: `POST /api/v1/stories/plan/revise` — `current_plan` + `feedback` + `revision_count` + `child_id` → 수정된 ScenePlan + StoryPreview + 갱신된 revision_count
+- **의존성**: S18 (StoryOrchestrator.revise_plan), S27 (인증), S28 (ChildProfile API)
+- **배경**: `InterpreterOrchestrator.revise_plan()`은 구현되어 있으나 라우터에 노출되어 있지 않음. S30b 흐름의 다음 화면(S31 미리보기/수정)이 호출할 엔드포인트가 없어 S30a와 동일한 분할 패턴으로 선결.
+- **revise_count 추적 결정**: **클라이언트 카운터 + 서버 검증** 방식. 요청에 `revision_count`(이미 적용된 횟수, 0-based)를 포함시켜 라우터가 `< MAX_REVISIONS(3)` 검증. `InterpreterOrchestrator._revision_count`는 매 요청마다 새 인스턴스가 생성되므로 사실상 무력화돼 있어 라우터 레벨로 끌어올림. (서버 잡 상태 도입은 MVP 범위 초과로 보류 — Phase 7에서 Redis 기반 세션 도입 시 재검토.)
+- **검증**: pytest 15/15 통과 (happy 3 + 인증 1 + 소유자 3 + revision_count 한도 2 + 입력 검증 5 + 에러 처리 1)
 
-### S32 — 생성 중 로딩 UX [대기]
-- **산출물**: SSE 수신, 장면별 프리뷰 카드 등장 애니메이션
+### S31 — 미리보기 & 수정 UI [완료]
+- **산출물**: `PreviewScreen` (요약 카드 + 장면 하이라이트 + 수정 입력 + 수정 카운터 + 확정 버튼), `revisePlan()` API 클라이언트, `MAX_REVISIONS_EXCEEDED` 에러 매핑
+- **추가 산출물**: `packages/mobile/src/api/stories.ts` 확장 (`revisePlan` + `PlanRevisionRequest/Response` + `MAX_REVISIONS` + `MAX_REVISIONS_EXCEEDED_CODE` 상수)
+- **의존성**: S30b, S31a
+- **검증**: `npx tsc --noEmit` 통과 + 백엔드 S30a/S31a 회귀 28/28 통과
+- **S32 임시 처리**: "이 이야기로 만들기" CTA 는 현재 Alert 으로 확정 상태 안내 + Home 복귀. S32(생성 중 로딩 UX) 에서 `navigation.navigate("Generation", {...})` 로 교체 예정(`// TODO(S32)` 주석 명시).
+
+### S32 — 생성 중 로딩 UX [완료]
+- **산출물**: `GenerationScreen` (진행률 바 + 장면 카드 `LayoutAnimation.spring` 등장 + 상태별 CTA), `generateStory()`/`getJobStatus()` API 클라이언트, 폴링 루프(`JOB_POLL_INTERVAL_MS = 1500ms`), 뒤로가기 차단
+- **추가 산출물**: `packages/mobile/src/api/stories.ts` 확장 (`JOB_POLL_INTERVAL_MS`, `JobStatusValue`, `ChildInput`, `GenerateStoryRequest/Response`, `GeneratedScene`, `JobStatusResponse`)
 - **의존성**: S31
+- **SSE vs 폴링 결정**: **폴링 채택**. React Native 기본 fetch 는 SSE 파서 없음 + Expo managed 에서 `react-native-sse` 도입은 네이티브 빌드 필요로 MVP 범위 초과. 백엔드 `GET /stories/jobs/{id}` 폴링만으로 충분하며 1.5초 간격은 장면 생성 체감 시간과 근접. SSE 는 S35/E2E 이후 성능 측정 재검토.
+- **검증**: `npx tsc --noEmit` 통과 + 백엔드 회귀 `test_s30a_plan_endpoint.py` + `test_s31a_plan_revise_endpoint.py` + `test_s19_story_api.py` 39/39 통과 + `ruff check` 통과
+- **S33 임시 처리**: 완료 시 "그림책 열어보기" CTA 는 현재 Alert + Home 복귀. S33(그림책 뷰어) 에서 `navigation.navigate("Viewer", { storyId })` 로 교체 예정(`// TODO(S33)` 주석 명시). 단, `story_id` 를 state 로 승격해야 하는 후속 수정 필요(SESSION_LOG 기록).
 
 **🔍 품질 게이트 G4.5**: S31 완료 후 핵심 사용자 플로우(프로필→서술입력→미리보기) 수동 검증.
 
-### S33 — 그림책 뷰어 [대기]
-- **산출물**: 페이지 넘기기, 일러스트 + 텍스트 레이아웃
-- **의존성**: S5
+### S33 — 그림책 뷰어 [완료]
+- **산출물**: `ViewerScreen` (가로 FlatList + pagingEnabled 스와이프, 일러스트 4:3 + 텍스트 카드 레이아웃, 페이지 인디케이터, 로딩/에러/성공 상태 분기), `getStory()` API 클라이언트 + `StoryDetailResponse`/`StoryPageDetail` 와이어 타입, `Viewer` 라우트 등록, GenerationScreen `storyId` state 승격 + `handleOpenBook` Alert → `navigation.reset([Home, Viewer])` 교체 (S32 후속 이슈 해소)
+- **의존성**: S5, S20 (GET /stories/{id}), S32 (Generation → Viewer 진입)
+- **검증**: `npx tsc --noEmit` 통과 + 백엔드 회귀 `test_s19_story_api.py` + `test_s20_story_storage.py` + `test_s30a_plan_endpoint.py` + `test_s31a_plan_revise_endpoint.py` **49/49 통과**
+- **페이지 넘기기 결정**: 가로 FlatList + pagingEnabled 스와이프 채택(버튼 없음). 책 넘기기 메타포 + 문학적 경험 + `getItemLayout`/`windowSize: 3` 성능 튜닝. 스크린리더 접근성 보조 버튼은 post-S35b 실기기 검증 후 재결정.
+- **S26 가드**: `illustration_url === null` 일 때 `🎨` + "그림은 곧 도착해요" placeholder UI. 일러스트 파이프라인 연결 전에도 텍스트 뷰어로 동작.
 
-### S34 — 내 서재 [대기]
-- **산출물**: 스토리 히스토리 목록, 재열람, 삭제
-- **의존성**: S33
+### S34 — 내 서재 [완료]
+- **산출물**: `LibraryScreen` (loading/error/empty/list 4상태 분기 + pull-to-refresh + 카드 long-press 삭제 Alert), `Library` 라우트 등록, HomeScreen "내 서재" 진입 버튼, ViewerScreen `headerRight` 삭제 CTA, mobile `listStories()`/`deleteStory()` API 클라이언트 + `StoryListItem`/`StoryListResponse` 와이어 타입 + `STORIES_PAGE_SIZE` 상수
+- **추가 산출물(백엔드)**: `DELETE /api/v1/stories/{story_id}` 라우트 (S34 신규) — JWT 인증 + 소유자 검증(404 통일) + ORM cascade 로 StoryPage 동시 삭제. `tests/test_s34_story_delete_endpoint.py` 10개 테스트 (happy 5 + 인증 1 + 소유자 4)
+- **의존성**: S33, S20 (GET /stories, GET /stories/{id})
+- **검증**: 백엔드 `pytest tests/test_s34_story_delete_endpoint.py` 10/10 통과 + 라우터 회귀 (s19+s20+s30a+s31a+s34) **59/59 통과** + `ruff check`/`ruff format` 통과 + `npx tsc --noEmit` 통과
+- **삭제 후 네비게이션**: ViewerScreen 의 삭제 CTA 는 진입 경로(Generation→reset 또는 Library→push) 양쪽 모두 `navigation.goBack()` 으로 자연 복귀(전자: Home, 후자: Library 카드 사라진 상태). LibraryScreen 의 long-press 삭제는 삭제된 카드만 로컬 state 에서 제거하여 화면 유지.
 
 ---
 
 ## Phase 7: 통합/운영 (S35~S38)
 
-### S35a — 백엔드 통합 E2E [대기]
-- **산출물**: 텍스트 파이프라인 + 일러스트 파이프라인 통합 E2E 테스트
+### S35a — 백엔드 통합 E2E [완료]
+- **산출물**: 텍스트 파이프라인(S18) + 일러스트 파이프라인(S26) + DB 저장(S20) 통합 E2E 테스트 (`tests/test_s35a_text_illustration_e2e.py`, 7 케이스)
+- **추가 산출물(라우터 통합 지점)**: `get_illustration_context_provider` 의존성 + `IllustrationContextProvider` 타입 + `IllustrationContextDep` Annotated + `_run_generation` 의 일러스트 루프 + `_save_story_to_db` 시그니처 확장(`story_id`/`illustrations`)
 - **의존성**: S20, S26
-- **검증**: API 호출 → 텍스트 생성 → 일러스트 생성 → DB 저장 전체 플로우
+- **검증**: `pytest tests/test_s35a_text_illustration_e2e.py` 7/7 통과 + 라우터 회귀(s19+s20+s26+s30a+s31a+s34+s35a) **79/79 통과** + `ruff check`/`ruff format` 통과
+- **프로덕션 연결 보류**: `get_illustration_context_provider` 는 기본 `None` 반환 → 텍스트-only. 실제 `CharacterSheetService` 조립 + `photo_hash` 캐시 조회 + `IllustrationOrchestrator` 조립은 프로덕션 플로우 연결 시점에 추가(CLIP/DINOv2 모델 래퍼가 여전히 미구현이라 실기기 품질 검증 이후 결정).
 
 ### S35b — 프론트-백 통합 E2E [대기]
 - **산출물**: 프로필등록 → 서술입력 → 미리보기 → 생성 → 열람 전체 플로우
