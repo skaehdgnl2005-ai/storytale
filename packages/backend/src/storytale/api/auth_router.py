@@ -16,10 +16,16 @@ from storytale.api.dependencies import get_db
 from storytale.auth.schemas import (
     AuthTokens,
     ConsentRequest,
+    EmailLoginRequest,
+    EmailRegisterRequest,
     SocialLoginRequest,
     TokenRefreshRequest,
 )
-from storytale.auth.service import AuthService, create_blacklist
+from storytale.auth.service import (
+    AuthService,
+    EmailAlreadyExistsError,
+    create_blacklist,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -75,6 +81,62 @@ async def login(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# S27b 이메일 회원가입 / 로그인
+# ---------------------------------------------------------------------------
+
+
+@router.post("/register/email", response_model=AuthTokens)
+async def register_email(
+    body: EmailRegisterRequest,
+    auth_service: AuthServiceDep,
+) -> AuthTokens:
+    """이메일+비밀번호 회원가입 → JWT 발급.
+
+    에러:
+    - 422: Pydantic 검증 실패 (이메일 형식, 비번 길이/바이트)
+    - 409: 이미 가입된 이메일 (inner code: EMAIL_ALREADY_EXISTS)
+    """
+    try:
+        return await auth_service.register_with_email(
+            email=body.email,
+            password=body.password,
+        )
+    except EmailAlreadyExistsError as exc:
+        # 기존 REJECTED_INTENT 패턴과 일관된 필드 순서: message → code
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "이미 가입된 이메일이에요 😊",
+                "code": "EMAIL_ALREADY_EXISTS",
+            },
+        ) from exc
+
+
+@router.post("/login/email", response_model=AuthTokens)
+async def login_email(
+    body: EmailLoginRequest,
+    auth_service: AuthServiceDep,
+) -> AuthTokens:
+    """이메일+비밀번호 로그인 → JWT 발급 (constant-time).
+
+    에러:
+    - 422: Pydantic 검증 실패 (이메일 형식)
+    - 401: 로그인 실패 (3가지 케이스 동일 응답: 이메일 없음 / 비번 틀림 /
+           소셜 전용 유저). 이메일 존재 여부 노출 방지.
+    """
+    try:
+        return await auth_service.login_with_email(
+            email=body.email,
+            password=body.password,
+        )
+    except ValueError as exc:
+        # /auth/refresh 의 에러 핸들링 패턴을 따름. 기존 /auth/login 의
+        # except Exception → 500 은 의도적으로 복제하지 않음 (SESSION_LOG
+        # 의 "발견된 이슈" 참조).
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
