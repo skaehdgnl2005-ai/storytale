@@ -44,6 +44,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { theme } from "../theme";
 import { ApiClientError } from "../api/client";
+import { forceLogoutToLogin } from "../auth/bootstrap";
 import { getProfile, type ChildProfile } from "../api/profiles";
 import {
   JOB_POLL_INTERVAL_MS,
@@ -111,8 +112,9 @@ export const GenerationScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (err.status === 401) {
-        // TODO(post-S27): 로그인 화면이 마련되면 navigation.replace("Login") 로 교체.
-        setErrorMessage("다시 로그인해주세요. 로그인 정보가 만료됐어요.");
+        // S27b — 토큰 만료/폐기 감지 시 저장소 비우고 Login 으로 강제 이동.
+        // 폴링 루프에서도 호출될 수 있으므로 fire-and-forget.
+        void forceLogoutToLogin(navigation);
         return;
       }
 
@@ -136,7 +138,9 @@ export const GenerationScreen: React.FC<Props> = ({ route, navigation }) => {
 
       setErrorMessage("잠깐, 다시 한번 해볼게요 😊");
     },
-    [],
+    // navigation 은 React Navigation 이 보장하는 stable ref 이지만, exhaustive-deps
+    // 린트와 동작 일관성을 위해 명시적으로 포함.
+    [navigation],
   );
 
   // -------------------------------------------------------------------------

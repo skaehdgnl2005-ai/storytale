@@ -36,6 +36,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { theme } from "../theme";
 import { ApiClientError } from "../api/client";
+import { forceLogoutToLogin } from "../auth/bootstrap";
 import {
   MAX_REVISIONS,
   MAX_REVISIONS_EXCEEDED_CODE,
@@ -101,11 +102,8 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     if (err.status === 401) {
-      // TODO(post-S27): 로그인 화면이 마련되면 navigation.replace("Login") 로 교체.
-      Alert.alert(
-        "다시 로그인해주세요",
-        "로그인 정보가 만료됐어요. 앱을 다시 열어주세요.",
-      );
+      // S27b — 토큰 만료/폐기 감지 시 저장소 비우고 Login 으로 강제 이동.
+      void forceLogoutToLogin(navigation);
       return;
     }
 
@@ -123,7 +121,8 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     Alert.alert("잠깐, 다시 한번 해볼게요 😊", "잠시 후 다시 시도해주세요.");
-  }, []);
+    // navigation 은 stable ref 이지만 exhaustive-deps 일관성을 위해 명시.
+  }, [navigation]);
 
   // -------------------------------------------------------------------------
   // 수정 요청

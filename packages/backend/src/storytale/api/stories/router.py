@@ -278,9 +278,18 @@ class JobStatus(Enum):
 
 
 class JobState:
-    """단일 잡의 상태."""
+    """단일 잡의 상태.
 
-    def __init__(self, job_id: str, total_scenes: int) -> None:
+    S35b: `user_id` 는 잡을 생성한 사용자의 ID(JWT `sub`). `/jobs/{job_id}`
+    과 `/jobs/{job_id}/stream` 이 소유자 검증을 통해 남의 잡 접근을 차단할 때
+    사용한다. security.md: "모든 API 에 소유자 검증" 규칙을 폴링/SSE 경로까지
+    확장하기 위해 도입. 과거 세션(S19/S35a) 는 `user_id=None` 이어도 동작
+    가능하도록 하위 호환을 유지한다(테스트 중 일부가 user_id 없이 job 생성).
+    """
+
+    def __init__(
+        self, job_id: str, total_scenes: int, user_id: str | None = None
+    ) -> None:
         self.job_id = job_id
         self.status = JobStatus.PENDING
         self.total_scenes = total_scenes
@@ -288,6 +297,7 @@ class JobState:
         self.scenes: list[dict[str, Any]] = []
         self.error: str | None = None
         self.story_id: str | None = None
+        self.user_id: str | None = user_id
         self.event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     def to_response(self) -> JobStatusResponse:
@@ -308,9 +318,9 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, JobState] = {}
 
-    def create_job(self, total_scenes: int) -> JobState:
+    def create_job(self, total_scenes: int, user_id: str | None = None) -> JobState:
         job_id = str(uuid.uuid4())
-        job = JobState(job_id=job_id, total_scenes=total_scenes)
+        job = JobState(job_id=job_id, total_scenes=total_scenes, user_id=user_id)
         self._jobs[job_id] = job
         return job
 
@@ -780,7 +790,7 @@ async def generate_story(
             illustration_orchestrator, character_sheet = ctx
 
     total_scenes = len(request.confirmed_plan.scenes)
-    job = job_manager.create_job(total_scenes=total_scenes)
+    job = job_manager.create_job(total_scenes=total_scenes, user_id=current_user_id)
 
     # JWT에서 추출한 user_id 사용 (요청 바디의 user_id 무시)
     background_tasks.add_task(
@@ -807,19 +817,34 @@ async def generate_story(
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-async def get_job_status(job_id: str) -> JobStatusResponse:
-    """잡 상태 및 진행률을 반환한다."""
+async def get_job_status(
+    job_id: str, current_user_id: CurrentUserDep
+) -> JobStatusResponse:
+    """잡 상태 및 진행률을 반환한다. JWT 인증 + 소유자 검증 필수.
+
+    S35b: 소유자가 아닌 사용자는 404 로 통일(소유자 정보 노출 방지).
+    `job.user_id` 가 None 인 레거시 잡은 보수적으로 404 로 처리한다.
+    """
     job = job_manager.get_job(job_id)
     if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id is None or job.user_id != current_user_id:
         raise HTTPException(status_code=404, detail="Job not found")
     return job.to_response()
 
 
 @router.get("/jobs/{job_id}/stream")
-async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
-    """SSE로 잡 이벤트를 스트리밍한다."""
+async def stream_job_events(
+    job_id: str, request: Request, current_user_id: CurrentUserDep
+) -> StreamingResponse:
+    """SSE로 잡 이벤트를 스트리밍한다. JWT 인증 + 소유자 검증 필수.
+
+    S35b: 폴링 엔드포인트와 동일한 소유자 검증 정책 적용.
+    """
     job = job_manager.get_job(job_id)
     if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id is None or job.user_id != current_user_id:
         raise HTTPException(status_code=404, detail="Job not found")
 
     async def event_generator():

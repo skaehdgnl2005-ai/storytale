@@ -4,6 +4,136 @@
 
 ---
 
+## S27b 세션 2 — 이메일+비밀번호 로그인 모바일 (2026-04-11)
+
+### 완료된 것
+- **LoginScreen 신규** — 이메일+비밀번호 입력 + 회원가입 ↔ 로그인 토글 + 에러 배너 + submit 후 토큰 저장 → `navigation.reset` 으로 Home 진입. ProfileFormScreen 과 동일한 디자인 토큰(팔레트/타이포/쉐도우) 재사용. 헤더 숨김(`headerShown: false`) 로 첫 인상 깔끔 + 401 fallback 진입 시에도 "돌아가기" 버튼 노출 안 해서 인증된 화면 복귀 불가.
+- **앱 부트스트랩 — `src/auth/bootstrap.ts`** — `bootstrapAuth()` 함수가 저장 토큰 로드 → `setAccessToken` → `GET /auth/me` 로 서버 측 유효성 검증 → 결과에 따라 초기 라우트(`Home` | `Login`) 결정. 네트워크/서버 오류도 `Login` 으로 라우팅(사용자 재시도 유도). 401 은 저장소 비움 후 `Login`, 그 외 오류는 저장소는 남겨두되 메모리 토큰만 비움(일시적 오류 가능성).
+- **`forceLogoutToLogin(navigation)` 헬퍼** — 동일 `bootstrap.ts` 안에 함께 배치. 메모리 토큰 클리어 + AsyncStorage 클리어 + `navigation.reset({ index: 0, routes: [{ name: "Login" }] })` 3단계. `/auth/logout` 서버 호출은 **일부러 하지 않음** — S27b 세션 1 발견된 `/auth/logout no-op 버그`(S27d 이월) 때문. S27d 에서 서버 무효화 병행 재검토.
+- **토큰 저장소 — `src/storage/tokenStore.ts`** — `saveTokens/loadTokens/clearTokens` + `StoredTokens` 인터페이스. `AsyncStorage.multiSet/multiGet/multiRemove` 사용으로 access + refresh 토큰을 atomic-ish 하게 관리. 키는 `"storytale.auth.accessToken"` / `"storytale.auth.refreshToken"` 네임스페이스로 묶어서 향후 마이그레이션 시 일괄 삭제 쉬움.
+- **API 클라이언트 확장 — `src/api/client.ts`** — 기존 `apiFetch`/`setAccessToken`/`parseErrorBody` 는 그대로. 말미에 `AuthTokens` + `CurrentUser` 인터페이스 + `registerWithEmail`/`loginWithEmail`/`getCurrentUser` 3개 함수만 추가. 에러 envelope 은 `parseErrorBody` 가 이미 409 inner code + 401 string detail + 422 를 파싱하므로 신규 로직 0줄.
+- **AppNavigator 확장** — `RootStackParamList` 에 `Login: undefined` 추가 + `AppNavigatorProps { initialRouteName: "Home" | "Login" }` 신규 prop + `Stack.Screen name="Login"` 등록(`headerShown: false`). 기존 9개 라우트는 그대로.
+- **App.tsx 부트스트랩 배선** — `useEffect` 로 `bootstrapAuth()` 1회 호출 → `initialRoute` state 업데이트 → 폰트 로드와 둘 다 준비되면 `AppNavigator initialRouteName={initialRoute}` 렌더. 그 전까지는 `null` 반환으로 Login ↔ Home flash 방지. `SplashScreen.hideAsync()` 도 둘 다 준비된 이후에만 호출.
+- **5개 화면 TODO 제거 + 일관된 401 정책** — `DescriptiveInputScreen` / `GenerationScreen` / `PreviewScreen` / `LibraryScreen` / `ViewerScreen` 전체에서 `TODO(post-S27|S30b+)` 주석을 `void forceLogoutToLogin(navigation)` 호출로 교체. **일관성 확장**: 같은 파일 내 다른 위치의 401 핸들러(`DescriptiveInput` 프로필 로딩 useEffect, `Library`/`Viewer` delete story 플로우)도 함께 교체하여 화면 내/화면 간 401 동작 통일. 총 8개 지점(5개 TODO + 3개 추가) 에서 일관 적용.
+- **임시 우회 제거** — `packages/backend/scripts/dev_token.py` 삭제. S35b 수동 스모크용 임시 JWT 발급 스크립트 → 정식 LoginScreen 이 대체하므로 역할 종료. `packages/mobile/src/api/client.ts:9` 의 하드코딩 흔적은 이미 S35b 에서 `git checkout` 으로 원복되어 있었고, 본 세션에서 `git diff` 로 재검증.
+- **의존성 추가** — `@react-native-async-storage/async-storage@2.2.0` (npx expo install 로 Expo SDK 54 호환 버전 자동 선택, +3 packages). `package.json` + `package-lock.json` 업데이트.
+
+### TDD 워크플로우
+1. **RED** — `AppNavigator.tsx` 에 `import { LoginScreen } from "../screens/LoginScreen"` 한 줄만 먼저 추가 → `npx tsc --noEmit` → `error TS2307: Cannot find module '../screens/LoginScreen'` 확인. S29~S34 패턴대로 컴파일 타임 RED.
+2. **GREEN 1** — `npx expo install @react-native-async-storage/async-storage` 로 2.2.0 설치.
+3. **GREEN 2** — `src/storage/tokenStore.ts` 신규 (saveTokens/loadTokens/clearTokens + StoredTokens 타입).
+4. **GREEN 3** — `src/api/client.ts` 말미에 AuthTokens/CurrentUser 인터페이스 + 3개 API 함수 추가.
+5. **GREEN 4** — `src/auth/bootstrap.ts` 신규 (bootstrapAuth + forceLogoutToLogin).
+6. **GREEN 5** — `src/screens/LoginScreen.tsx` 신규.
+7. **GREEN 6** — `AppNavigator.tsx` 확장 (Login 라우트 + initialRouteName prop).
+8. **GREEN 7** — `App.tsx` 부트스트랩 useEffect 배선.
+9. **GREEN 8** — 5개 화면의 401 핸들러 교체(TODO 주석 제거) + 같은 파일 내 추가 401 지점 3개 병합.
+10. **검증** — `npx tsc --noEmit` (mobile) → exit 0. `cd ../shared && npx tsc --noEmit` → exit 0. `git diff packages/mobile/src/api/client.ts` → 하드코딩 JWT/`eyJ` 0건.
+11. **정리** — `rm packages/backend/scripts/dev_token.py`. `pycache` 에 바이트코드 흔적 없음 확인.
+
+### 구현 요약
+- **주요 클래스/함수/파일**:
+  - `packages/mobile/src/storage/tokenStore.ts::saveTokens(tokens: StoredTokens)` — `AsyncStorage.multiSet` 으로 access + refresh 쌍 원자성 근사
+  - `packages/mobile/src/storage/tokenStore.ts::loadTokens()` — 반환값 `StoredTokens | null`. 둘 중 하나라도 null 이면 전체 null 취급(부분 손상 방어)
+  - `packages/mobile/src/storage/tokenStore.ts::clearTokens()` — `multiRemove` 로 두 키 일괄 삭제
+  - `packages/mobile/src/api/client.ts::AuthTokens` — 세션 1 `AuthTokens` Pydantic 모델과 1:1 매칭 (`access_token`/`refresh_token`/`expires_in`, snake_case)
+  - `packages/mobile/src/api/client.ts::CurrentUser` — `GET /auth/me` 응답 타입. `email: string | null` (소셜 유저는 null 가능)
+  - `packages/mobile/src/api/client.ts::registerWithEmail(email, password)` — `POST /auth/register/email`
+  - `packages/mobile/src/api/client.ts::loginWithEmail(email, password)` — `POST /auth/login/email`
+  - `packages/mobile/src/api/client.ts::getCurrentUser()` — `GET /auth/me`
+  - `packages/mobile/src/auth/bootstrap.ts::bootstrapAuth()` — 반환값 `BootstrapRoute = "Home" | "Login"`
+  - `packages/mobile/src/auth/bootstrap.ts::forceLogoutToLogin(navigation)` — `NavigationProp<RootStackParamList>` 타입 받음. 6개 화면에서 재사용
+  - `packages/mobile/src/screens/LoginScreen.tsx::LoginScreen` — `mode: "login" | "signup"` state + email/password state + errorMessage state + `MIN_PASSWORD_LENGTH = 8` 클라 사이드 가드
+  - `packages/mobile/src/screens/LoginScreen.tsx::handleSubmit` — 성공 시 `setAccessToken` → `saveTokens` → `navigation.reset({ index: 0, routes: [{ name: "Home" }] })`. 실패 시 `handleError` 로 분기
+  - `packages/mobile/src/screens/LoginScreen.tsx::handleError` — 409/EMAIL_ALREADY_EXISTS (회원가입 중) → 자동 모드 전환 + 안내, 401 → 통일 메시지, 422 → 서버 detail, 기타 → 일반 메시지
+  - `packages/mobile/src/navigation/AppNavigator.tsx::AppNavigator` — prop `initialRouteName` 받아서 `Stack.Navigator` 에 전달. Login 화면은 `headerShown: false`
+  - `packages/mobile/App.tsx::App` — `useState<BootstrapRoute | null>` + `useEffect(() => bootstrapAuth().then(setInitialRoute), [])` + cancelled 가드
+- **계약 대비 변경점**:
+  - `contracts/user-service.ts` 에는 모바일 클라이언트 구현 세부사항이 없음. 본 세션은 세션 1 이 확정한 `POST /auth/register/email` / `POST /auth/login/email` 엔드포인트 + `AuthTokens` / `CurrentUser` 응답 스키마에 1:1 매칭하는 타입스크립트 클라이언트를 추가. 계약 확장 성격.
+  - `client.ts::AuthTokens` 는 snake_case(`access_token`/`refresh_token`/`expires_in`) — 백엔드 JSON 형식을 그대로 받아서 camelCase 변환 없이 사용. 변환 레이어 도입은 과투자.
+  - `parseErrorBody` 가 이미 409 + nested `{message, code}` 패턴(REJECTED_INTENT 선례)을 파싱하므로 `EMAIL_ALREADY_EXISTS` inner code 분기에 추가 코드 0줄.
+- **환경변수**: 추가 없음. 기존 `EXPO_PUBLIC_API_URL` 그대로 사용.
+- **의존 모듈 사용**:
+  - `@react-native-async-storage/async-storage@2.2.0` (신규) — `multiSet`/`multiGet`/`multiRemove` 만 사용. 평문 저장소라 JWT 보호에는 한계 있음(SecureStore 마이그레이션 기술부채).
+  - `@react-navigation/native::NavigationProp` (타입 전용) — `forceLogoutToLogin` 의 navigation 파라미터 타입 제약.
+  - `ApiClientError`(S28) / `parseErrorBody`(S28/S30a) — 에러 envelope 파싱 + status/code 접근 인터페이스 재사용.
+
+### 설계 결정 메모
+- **AsyncStorage vs SecureStore**: 핸드오프가 AsyncStorage 예시로 제시했고 세션 2 는 사용자 지시에 따라 그대로 따름. SecureStore 가 JWT 저장에는 더 적합(OS Keychain/Keystore 기반 암호화)하지만 (1) 추가 의존성 설치 판단 보류, (2) MVP dev/테스트용 최소 로그인 범위, (3) S38 배포 전 보안 강화 트랙으로 분리 가능 — 세 가지 이유로 AsyncStorage 채택. **기술 부채로 기록**: S38 배포 전 `expo-secure-store` 마이그레이션 필수.
+- **401 정책 일관성**: 핸드오프는 "5개 화면 TODO 주석 교체" 로 범위를 잡았지만, 실제로는 5개 화면 중 3개 파일(`DescriptiveInput`/`Library`/`Viewer`) 내부에 401 핸들러가 2개씩 있었음. 일관성 원칙("같은 파일 안에서 401 은 모두 같은 동작") 에 따라 총 8개 지점을 모두 `forceLogoutToLogin` 으로 통일. 각 화면이 401 을 만날 때 다르게 행동하면 사용자 혼란을 유발할 위험이 있었음.
+- **초기 라우트 결정 아키텍처**: `App.tsx` 가 부트스트랩 상태를 보유하고 결과를 `AppNavigator` 에 prop 으로 내려주는 방식을 택함. 대안으로 Navigator 내부에서 state 관리할 수도 있었으나 (1) `NavigationContainer` 가 이미 마운트된 후 `initialRouteName` 을 바꿀 수 없고, (2) 부트스트랩 중에는 `null` 반환으로 flash 방지가 가능하므로 prop 드라이븐이 더 단순. `fontsLoaded` 패턴과 동일 구조로 일관.
+- **Login 진입 시 헤더 숨김**: 첫 인상 깔끔함 + 401 fallback 시 "돌아가기" 노출 차단 이중 목적. Login 은 stack 의 맨 아래(`navigation.reset` 후) 이거나 initialRoute 이므로 back 이 아예 불가능하지만, 혹시 모를 경로(future deep link 등)에서 인증된 화면으로의 복귀를 차단하는 defensive 설정.
+- **클라이언트 사이드 비번 길이 가드(MIN_PASSWORD_LENGTH = 8)**: 세션 1 의 `MIN_PASSWORD_LENGTH = 8` 과 일치. 서버 422 왕복을 줄여 UX 개선. 서버가 최종 검증하므로 이중 안전망.
+- **회원가입 중 EMAIL_ALREADY_EXISTS 감지 시 자동 모드 전환**: 사용자가 "계정 있는지 몰랐다" 가 아니라 "로그인/회원가입 탭을 잘못 선택했다" 가 더 흔하다는 가정. 입력값을 그대로 보존한 채 모드만 바꿔주면 사용자는 비번만 한번 더 확인하고 진행 가능.
+
+### 다음 세션에 알려줄 것
+- **S27b 세션 2 진입 조건 모두 충족** — (1) 5개 화면 TODO 제거 완료, (2) `client.ts` 하드코딩 흔적 0건, (3) `dev_token.py` 삭제 완료, (4) `npx tsc --noEmit` mobile + shared 양쪽 통과. 남은 것은 **실기기 수동 스모크** — `docs/S27b-handoff.md` 의 "세션 2 TDD 로드맵" 말미에 명시된 대로 "LoginScreen → 회원가입 → Home → ProfileForm 진입 → S35b 9화면 체크리스트 전체 1회 탭" 이 필요.
+- **스모크 테스트 절차(사용자 수행)**:
+  1. 백엔드 재시작 (`uvicorn storytale.app:app --reload --port 8000 --host 0.0.0.0`)
+  2. `packages/mobile/.env.local` 의 `EXPO_PUBLIC_API_URL` 이 핫스팟 LAN IP 로 설정돼 있는지 확인 (S35b 에서 `172.20.10.10:8000` 사용)
+  3. `cd packages/mobile && npx expo start --clear` (이전 번들 캐시 제거)
+  4. 폰에서 Expo Go 로 연결 → **LoginScreen 이 첫 화면으로 떠야 함** (부트스트랩 성공 판정 1)
+  5. "처음이에요, 가입할래요" 토글 → signup 모드 → 이메일+비번 입력 → "가입하기" → Home 진입 (성공 판정 2)
+  6. Home → ProfileForm → 프로필 등록 → Home 복귀 (판정 3)
+  7. Home → 이야기 만들기 → PurposeSelect → DescriptiveInput → Preview → Generation → Viewer (판정 4)
+  8. Home → 내 서재 → 카드 탭 → Viewer → back → Library → back → Home (판정 5)
+  9. **앱 완전 종료 후 재실행** → **이번엔 Home 이 첫 화면** (저장된 토큰으로 부트스트랩 성공 판정 6)
+  10. 결과를 `docs/SESSION_LOG.md` 의 S35b 엔트리 "실기기 수동 스모크" 섹션에 **추가 기록** (S27b 세션 2 완료 후 LoginScreen 포함 10화면 탭 완료 여부)
+- **회원가입 경로 선택 이유**: S35b 세션에서 dev_token.py 로 생성된 dev 유저는 `password_hash: NULL` 이므로 새 LoginScreen 의 login 경로로는 진입 불가. 스모크에서는 반드시 **signup 모드로 새 이메일 등록** 해야 함.
+- **부트스트랩 실패 분기 테스트**: (1) AsyncStorage 에 만료된 토큰이 남아있을 때 `/auth/me` 가 401 → `clearTokens` → Login 으로 라우팅 되는지도 확인하면 좋음. 스모크에서 생성한 토큰을 `adb shell run-as com.storytale.mobile` 로 편집하는 등의 방법은 과투자 — 시간 기다려서 만료 확인은 skip.
+- **S38 배포 전 필수 보안 작업**:
+  1. **AsyncStorage → expo-secure-store 마이그레이션** — JWT 는 Keychain/Keystore 에 저장해야 root/jailbreak 방어 가능. `tokenStore.ts` 인터페이스는 그대로 유지하고 구현만 교체.
+  2. **JWT refresh flow 도입** — 현재 `loginWithEmail`/`registerWithEmail` 은 access token 만 setAccessToken. 서버는 refresh token 도 발급했으므로 401 수신 시 자동 refresh 시도 후 실패 시에만 `forceLogoutToLogin` 하도록 `apiFetch` 에 retry 로직 추가 권장(과투자 vs UX 트레이드오프 — S27b 는 의도적으로 생략).
+  3. **`/auth/logout` 서버 무효화 병합** — 현재는 `forceLogoutToLogin` 이 로컬만 비움. S27d 에서 router no-op 버그 수정 후 `fetch("/auth/logout", ...)` 호출 병행 필요.
+
+### 발견된 이슈 / 이월 사항
+
+- **(중간, 기술부채) AsyncStorage 평문 저장** — JWT 가 iOS sandbox / Android shared_prefs XML 에 평문. jailbreak/root 된 디바이스에서 탈취 가능. S38 전 `expo-secure-store` 마이그레이션 필수. `tokenStore.ts` 인터페이스가 동일하므로 교체 부담 낮음(~20줄).
+- **(중간) refresh token 자동 재발급 미구현** — `apiFetch` 는 여전히 401 을 그대로 throw. 화면이 `forceLogoutToLogin` 으로 유저를 쫓아내는 대신, `/auth/refresh` 를 1회 시도한 뒤 실패 시에만 쫓아내는 것이 정석. MVP 기준 access token TTL 24시간으로 충분하다고 판단하여 의도적 생략. S38 사용자 피드백에서 "24시간 지나면 로그인 다시 해야 해요" 불만이 나오면 그때 추가.
+- **(낮음) LoginScreen MIN_PASSWORD_LENGTH 상수 중복** — 세션 1 `schemas.py::MIN_PASSWORD_LENGTH = 8` 과 `LoginScreen.tsx::MIN_PASSWORD_LENGTH = 8` 가 독립 정의. 공유 타입 패키지(`packages/shared`) 로 옮기면 한 곳 수정으로 전파 가능. 다만 shared 패키지가 현재 TypeScript only 이고 Python 쪽은 별도 유지 중이라 cross-language 공유는 별도 과제.
+- **(낮음) `Login` 화면 진입 시 keyboard-avoiding 레이아웃 미검증** — iOS 에서 email 입력 필드 focus 시 키보드가 비번 필드를 덮지 않는지 실기기 스모크 필요. ProfileFormScreen 이 동일 `KeyboardAvoidingView` 패턴을 쓰므로 같은 결과 기대.
+- **(낮음) 비번 표시/숨김 토글 부재** — `secureTextEntry` 고정. MVP 기준 비번 입력 오타 재확인 UX 는 과투자로 판단. 사용자 피드백 누적되면 추가.
+- **(낮음) `listProfiles` 401 = 만료 토큰 분기가 forceLogoutToLogin 로 통일됨** — 기존 "프로필을 불러오지 못했어요" 메시지 대신 바로 Login 으로 점프. 사용자 입장에서는 "왜 다시 로그인?" 이 될 수 있으나, 대안(에러 메시지 보여주고 수동 재로그인 유도) 은 401 감지 후 액션 강제성이 없어 장시간 stuck 가능. 본 세션의 일관 정책(401 = Login 으로 자동 이동) 이 우선.
+- **(이월, 기록) `/auth/logout` no-op 버그** — 세션 1 에서 발견, S27d 로 분리. 본 세션은 영향 없음(능동 로그아웃 UI 추가하지 않음 — 핸드오프 지침 준수). S27d 완료 후 `forceLogoutToLogin` 에 서버 호출 병합.
+
+### 변경된 파일 목록
+**코드 (모바일)**:
+- `packages/mobile/src/screens/LoginScreen.tsx` (신규, ~280줄)
+- `packages/mobile/src/storage/tokenStore.ts` (신규, ~50줄)
+- `packages/mobile/src/auth/bootstrap.ts` (신규, ~75줄)
+- `packages/mobile/src/api/client.ts` (수정: 말미에 AuthTokens + CurrentUser + 3개 함수 추가)
+- `packages/mobile/src/navigation/AppNavigator.tsx` (수정: Login 라우트 + `initialRouteName` prop)
+- `packages/mobile/App.tsx` (수정: `bootstrapAuth` useEffect + `initialRoute` state)
+- `packages/mobile/src/screens/DescriptiveInputScreen.tsx` (수정: 401 핸들러 2개 교체 + `forceLogoutToLogin` import)
+- `packages/mobile/src/screens/GenerationScreen.tsx` (수정: 401 핸들러 1개 교체 + useCallback deps 수정)
+- `packages/mobile/src/screens/PreviewScreen.tsx` (수정: 401 핸들러 1개 교체 + useCallback deps 수정)
+- `packages/mobile/src/screens/LibraryScreen.tsx` (수정: 401 핸들러 2개 교체 — load + delete story)
+- `packages/mobile/src/screens/ViewerScreen.tsx` (수정: 401 핸들러 2개 교체 — load + delete story)
+
+**의존성**:
+- `packages/mobile/package.json` (수정: `@react-native-async-storage/async-storage: "2.2.0"` 추가)
+- `package-lock.json` (자동 갱신, +3 packages)
+
+**삭제**:
+- `packages/backend/scripts/dev_token.py` (S35b 임시 JWT 발급 스크립트 — LoginScreen 정식 경로로 대체)
+
+**문서**:
+- `docs/SESSION_LOG.md` (본 항목)
+- `docs/TASK_BACKLOG.md` (S27b 상태 [완료] 로 전환)
+- `docs/PROGRESS.md` (Phase 7 진행률 + 현재 위치 갱신)
+
+### 진입 조건 체크리스트 (핸드오프 세션 2 TDD 로드맵 대비)
+- [x] `npx tsc --noEmit` 통과 (mobile + shared)
+- [x] 5개 화면 TODO(post-S27) 주석 0건 (`grep "TODO.*post-S27"` 결과 없음)
+- [x] `packages/mobile/src/api/client.ts` 하드코딩 토큰 0건 (`git diff` 검증)
+- [x] `packages/backend/scripts/dev_token.py` 삭제
+- [x] `LoginScreen.tsx` 신규 파일 생성 + `AppNavigator` 등록
+- [x] `App.tsx` 부트스트랩 단계 배선
+- [x] `tokenStore.ts` + `bootstrap.ts` 신규 생성
+- [ ] **실기기 수동 스모크 (LoginScreen → 회원가입 → 9화면 체크리스트)** — 사용자 수행 대기 중
+
+---
+
 ## S27b 세션 1 — 이메일+비밀번호 로그인 백엔드 (2026-04-11)
 
 ### 완료된 것

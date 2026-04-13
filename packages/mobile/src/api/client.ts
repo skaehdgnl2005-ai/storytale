@@ -2,6 +2,7 @@
  * API 클라이언트 — fetch 기반, JWT 토큰 자동 첨부.
  *
  * S28: 프로필 API 연동을 위한 최소 인프라.
+ * S27b: 이메일+비밀번호 로그인 API 함수 + AuthTokens 타입 추가.
  */
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
@@ -112,4 +113,67 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   }
 
   return response.json() as Promise<T>;
+}
+
+// ---------------------------------------------------------------------------
+// S27b — 이메일+비밀번호 인증 API
+// ---------------------------------------------------------------------------
+
+/**
+ * 백엔드 AuthTokens 응답 형식. S27/S27b 공통.
+ * 계약: packages/backend/src/storytale/auth/schemas.py::AuthTokens
+ */
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+}
+
+/**
+ * 현재 로그인한 사용자 정보. `GET /auth/me` 응답.
+ * 계약: packages/backend/src/storytale/api/auth_router.py::get_me
+ */
+export interface CurrentUser {
+  user_id: string;
+  email: string | null;
+  provider: string;
+  consent_given: boolean;
+}
+
+/**
+ * 이메일+비밀번호 회원가입.
+ *
+ * - 성공: AuthTokens (access + refresh + expires_in).
+ * - 409 + code "EMAIL_ALREADY_EXISTS": 이미 가입된 이메일.
+ * - 422: Pydantic 검증 실패 (이메일 형식 / 비번 길이 / UTF-8 72바이트 초과).
+ */
+export function registerWithEmail(email: string, password: string): Promise<AuthTokens> {
+  return apiFetch<AuthTokens>("/auth/register/email", {
+    method: "POST",
+    body: { email, password },
+  });
+}
+
+/**
+ * 이메일+비밀번호 로그인.
+ *
+ * - 성공: AuthTokens.
+ * - 401: 로그인 실패. 백엔드는 3가지 케이스(이메일 없음 / 비번 틀림 /
+ *   소셜 전용 유저)를 동일 응답으로 처리 — 이메일 존재 여부 노출 방지.
+ *   UI 는 "이메일 또는 비밀번호를 다시 확인해주세요" 로 통일.
+ * - 422: 이메일 형식 검증 실패.
+ */
+export function loginWithEmail(email: string, password: string): Promise<AuthTokens> {
+  return apiFetch<AuthTokens>("/auth/login/email", {
+    method: "POST",
+    body: { email, password },
+  });
+}
+
+/**
+ * 현재 토큰의 유효성 검증 + 사용자 정보 조회.
+ * bootstrap 단계에서 저장된 토큰이 만료/폐기되었는지 확인한다.
+ */
+export function getCurrentUser(): Promise<CurrentUser> {
+  return apiFetch<CurrentUser>("/auth/me", { method: "GET" });
 }

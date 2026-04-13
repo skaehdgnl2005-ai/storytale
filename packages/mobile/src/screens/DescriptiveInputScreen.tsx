@@ -37,6 +37,7 @@ import type { RootStackParamList } from "../navigation/AppNavigator";
 import type { PurposeId } from "../data/purposes";
 import { theme } from "../theme";
 import { ApiClientError } from "../api/client";
+import { forceLogoutToLogin } from "../auth/bootstrap";
 import { listProfiles, type ChildProfile } from "../api/profiles";
 import {
   PARENT_TEXT_MAX_LENGTH,
@@ -132,17 +133,22 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
         }
       } catch (err) {
         if (cancelled) return;
-        const message =
-          err instanceof ApiClientError && err.status === 401
-            ? "로그인 정보가 만료됐어요. 다시 들어와주세요."
-            : "프로필을 불러오지 못했어요. 잠시 후 다시 시도해주세요.";
-        setProfileState({ kind: "error", message });
+        if (err instanceof ApiClientError && err.status === 401) {
+          // S27b — 401 일관 정책: 저장소 비우고 Login 으로 강제 이동.
+          void forceLogoutToLogin(navigation);
+          return;
+        }
+        setProfileState({
+          kind: "error",
+          message: "프로필을 불러오지 못했어요. 잠시 후 다시 시도해주세요.",
+        });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+    // navigation 은 React Navigation 이 보장하는 stable ref. 한 번만 실행된다.
+  }, [navigation]);
 
   const trimmedLength = useMemo(() => text.trim().length, [text]);
   const overLimit = text.length > PARENT_TEXT_MAX_LENGTH;
@@ -170,11 +176,9 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
     }
 
     if (err.status === 401) {
-      // TODO(S30b+): 로그인 화면이 마련되면 navigation.replace("Login") 로 교체.
-      Alert.alert(
-        "다시 로그인해주세요",
-        "로그인 정보가 만료됐어요. 앱을 다시 열어주세요.",
-      );
+      // S27b — 토큰 만료/폐기 감지 시 저장소 비우고 Login 으로 강제 이동.
+      // fire-and-forget: handleApiError 는 void 반환이므로 await 하지 않음.
+      void forceLogoutToLogin(navigation);
       return;
     }
 

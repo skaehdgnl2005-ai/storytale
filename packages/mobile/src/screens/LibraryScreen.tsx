@@ -40,6 +40,7 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
 import { theme } from "../theme";
 import { ApiClientError } from "../api/client";
+import { forceLogoutToLogin } from "../auth/bootstrap";
 import {
   deleteStory,
   listStories,
@@ -108,8 +109,8 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     } catch (err) {
       if (err instanceof ApiClientError) {
         if (err.status === 401) {
-          // TODO(post-S27): 로그인 화면 마련되면 navigation.replace("Login").
-          setErrorMessage("다시 로그인해주세요. 로그인 정보가 만료됐어요.");
+          // S27b — 토큰 만료/폐기 감지 시 저장소 비우고 Login 으로 강제 이동.
+          void forceLogoutToLogin(navigation);
         } else {
           setErrorMessage("잠깐, 다시 한번 해볼게요 😊");
         }
@@ -117,7 +118,7 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         setErrorMessage("예상치 못한 오류가 생겼어요.");
       }
     }
-  }, []);
+  }, [navigation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,10 +175,8 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
                     return;
                   }
                   if (err.status === 401) {
-                    Alert.alert(
-                      "로그인이 필요해요",
-                      "로그인 정보가 만료됐어요. 다시 로그인해주세요.",
-                    );
+                    // S27b — 401 일관 정책: 저장소 비우고 Login 으로 강제 이동.
+                    void forceLogoutToLogin(navigation);
                     return;
                   }
                 }

@@ -2,6 +2,7 @@ import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { HomeScreen } from "../screens/HomeScreen";
+import { LoginScreen } from "../screens/LoginScreen";
 import { ProfileFormScreen } from "../screens/ProfileFormScreen";
 import { PurposeSelectScreen } from "../screens/PurposeSelectScreen";
 import { DescriptiveInputScreen } from "../screens/DescriptiveInputScreen";
@@ -14,6 +15,9 @@ import type { ScenePlan, StoryPreview } from "../api/stories";
 import { theme } from "../theme";
 
 export type RootStackParamList = {
+  // S27b — 이메일+비밀번호 로그인/회원가입. 최초 진입 + 401 fallback 양쪽에서 사용.
+  // navigation.reset 로 진입 후 stack 을 비우므로 back 으로 복귀 불가.
+  Login: undefined;
   Home: undefined;
   ProfileForm: undefined;
   PurposeSelect: undefined;
@@ -44,10 +48,20 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-export const AppNavigator = () => {
+interface AppNavigatorProps {
+  /**
+   * S27b — 부트스트랩 시 저장 토큰을 검증한 뒤 초기 라우트를 결정한다.
+   * "Home" 이면 이미 로그인됨, "Login" 이면 로그인 필요.
+   * `App.tsx::bootstrapAuth` 가 결정해서 전달.
+   */
+  initialRouteName: "Home" | "Login";
+}
+
+export const AppNavigator: React.FC<AppNavigatorProps> = ({ initialRouteName }) => {
   return (
     <NavigationContainer>
       <Stack.Navigator
+        initialRouteName={initialRouteName}
         screenOptions={{
           headerStyle: { backgroundColor: theme.colors.background },
           headerTintColor: theme.colors.text,
@@ -55,6 +69,14 @@ export const AppNavigator = () => {
           contentStyle: { backgroundColor: theme.colors.background },
         }}
       >
+        <Stack.Screen
+          name="Login"
+          component={LoginScreen}
+          // S27b — 로그인 화면은 헤더 숨김 (첫 인상 깔끔하게).
+          // 401 fallback 진입 시에도 "돌아가기" 버튼을 일부러 노출하지 않아
+          // 사용자가 혼란스러운 인증된 화면으로 돌아가지 못하도록 한다.
+          options={{ headerShown: false }}
+        />
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen
           name="ProfileForm"

@@ -262,10 +262,44 @@
 
 ## Phase 6: 프론트엔드 (S27~S34)
 
-### S27 — 인증 (소셜 로그인) [완료]
+### S27 — 인증 (소셜 로그인) [완료 (백엔드만) — 모바일 통합은 S27b 에서 해소]
 - **시작 시 필수 읽기**: `docs/ARCHITECTURE.md`, `docs/contracts/user-service.ts`
-- **산출물**: 카카오/구글/애플 소셜 로그인, JWT 발급, 법정대리인 동의 플로우
+- **산출물**: 카카오/구글/애플 소셜 로그인 **백엔드** (`auth_router`, `AuthService`, JWT 발급, 법정대리인 동의 플로우, `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/consent`, `/auth/me`)
 - **의존성**: S4, S5
+- **미완 사항(2026-04-11 S35b 수동 스모크 중 발견, S27b 에서 해소)**: ~~모바일 측 로그인 UI 전무~~ → S27b 세션 1(백엔드 이메일/비번) + 세션 2(모바일 LoginScreen + 토큰 영속화 + 401 통일 정책) 로 완전 해소. 5개 화면의 `TODO(post-S27)` 주석 전부 제거됨.
+
+### S27b — 이메일+비밀번호 로그인 (모바일 통합) [완료 (실기기 스모크 대기)]
+- **2026-04-11 세션 1 완료**: 백엔드 전체 — `POST /auth/register/email` + `POST /auth/login/email` + `User.password_hash` + bcrypt + constant-time login + 15/15 테스트. 상세는 SESSION_LOG S27b 세션 1.
+- **2026-04-11 세션 2 완료**: 모바일 전체 — `LoginScreen.tsx` + `tokenStore.ts` (AsyncStorage wrapper) + `bootstrap.ts` (`bootstrapAuth` + `forceLogoutToLogin`) + `AppNavigator` 에 Login 라우트 + `App.tsx` 부트스트랩 배선 + 5개 화면의 `TODO(post-S27)` 주석 제거. 총 8개 401 지점 `forceLogoutToLogin` 으로 통일. `packages/backend/scripts/dev_token.py` 삭제 완료. `npx tsc --noEmit` (mobile + shared) 통과. 상세는 SESSION_LOG S27b 세션 2.
+- **실기기 수동 스모크**: 사용자 수행 대기 — LoginScreen → 회원가입 → 9화면 탭 체크리스트 → 앱 재시작 후 자동 Home. 결과는 SESSION_LOG S35b 엔트리에 추가 기록 예정.
+- **비범위 (S27c 로 분리)**: 카카오/구글/애플 OAuth SDK 연동. 앱스토어 심사 "3rd-party sign-in 옵션" 요구사항 맞추려는 목적이므로 **출시 직전** 에 별도 태스크. 개발 중엔 불필요.
+
+### S27b (원본 계획) — 이메일+비밀번호 로그인 모바일 통합 [아카이브]
+- **산출물 (2 세션 분할)**:
+  - **세션 1 — 백엔드 (약 6 파일)**:
+    - `db/models.py::User` 에 `password_hash` 컬럼 추가 (소셜 사용자는 nullable 유지)
+    - `alembic/versions/XXX_add_password_hash.py` 신규 migration
+    - `auth/service.py` 에 `register_with_email(email, password, name)` + `login_with_email(email, password)` 추가 (bcrypt 해싱)
+    - `auth/schemas.py` 에 `EmailRegisterRequest`/`EmailLoginRequest` 추가
+    - `api/auth_router.py` 에 `POST /auth/register/email` + `POST /auth/login/email` 추가
+    - `tests/test_s27b_email_auth.py` 신규 (happy path + 중복 이메일 409 + 잘못된 비번 401 + 비번 검증)
+  - **세션 2 — 모바일 (약 4 파일)**:
+    - `src/screens/LoginScreen.tsx` 신규 (이메일/비밀번호 폼 + 회원가입 ↔ 로그인 토글 + 에러 표시)
+    - `src/navigation/AppNavigator.tsx` 에 `Login` 라우트 + **초기 라우트 조건부 분기** (토큰 부트스트랩 결과에 따라 Login/Home)
+    - `App.tsx` 또는 신규 `src/auth/bootstrap.tsx` — 앱 시작 시 AsyncStorage 에서 토큰 로드 → `setAccessToken` → 유효성 검증(`GET /auth/me` 1회)
+    - `src/api/client.ts` 확장 또는 신규 `src/storage/tokenStore.ts` — 토큰 영속화 + `loginWithEmail`/`registerWithEmail` API 함수
+- **의존성**: S27 (기존 JWT 파이프라인 재사용 — `AuthService.create_access_token`/`create_refresh_token` 그대로), S3 (User 모델 확장)
+- **배경**: S35b 실기기 수동 스모크 진입 시 발견된 S27 의 미완 영역. S35b 세션로그 "발견된 이슈" 참조. dev 테스트 + G4.5 수동 리뷰 + S38 내부 테스트까지 이메일/비번 하나로 충분.
+- **비범위 (S27c 로 분리)**: 카카오/구글/애플 OAuth SDK 연동. 앱스토어 심사 "3rd-party sign-in 옵션" 요구사항 맞추려는 목적이므로 **출시 직전** 에 별도 태스크. 개발 중엔 불필요.
+- **검증**:
+  - 백엔드: `pytest tests/test_s27b_email_auth.py` 통과 + 기존 `test_s27_auth_api.py` 회귀 유지
+  - 모바일: `npx tsc --noEmit` 통과 + **실기기 1회 스모크** — LoginScreen 에서 회원가입 → 자동 로그인 → Home → ProfileForm 진입까지. S35b 미완 스모크와 병합.
+- **주의사항**:
+  1. bcrypt round: dev 에선 4, prod 에선 12. 환경변수 `BCRYPT_ROUNDS` 로 분기.
+  2. 비밀번호 정책: 최소 8자. 복잡도 규칙(대소문자/숫자/특수문자)은 MVP 범위 초과 — S27c 이후 재평가.
+  3. 이메일 중복: 409 Conflict 반환. mobile `parseErrorBody` 가 이미 envelope 형식을 지원하므로 클라 쪽은 변경 최소.
+  4. 기존 social login 유저의 하위 호환: `password_hash` 는 nullable 이므로 social 사용자는 기존 경로(`/auth/login` with provider+auth_code) 유지, email 사용자는 `/auth/login/email` 사용.
+  5. 법정대리인 동의(`consent_given_at`): 회원가입 직후 `POST /auth/consent` 호출 흐름 유지(S27 설계). LoginScreen 에서 회원가입 완료 시 동의 다이얼로그 1회 노출 필요.
 
 ### S28 — 아이 프로필 등록 UI [완료]
 - **산출물**: 프로필 입력 폼, 사진 업로드, API 연동
@@ -338,9 +372,12 @@
 - **검증**: `pytest tests/test_s35a_text_illustration_e2e.py` 7/7 통과 + 라우터 회귀(s19+s20+s26+s30a+s31a+s34+s35a) **79/79 통과** + `ruff check`/`ruff format` 통과
 - **프로덕션 연결 보류**: `get_illustration_context_provider` 는 기본 `None` 반환 → 텍스트-only. 실제 `CharacterSheetService` 조립 + `photo_hash` 캐시 조회 + `IllustrationOrchestrator` 조립은 프로덕션 플로우 연결 시점에 추가(CLIP/DINOv2 모델 래퍼가 여전히 미구현이라 실기기 품질 검증 이후 결정).
 
-### S35b — 프론트-백 통합 E2E [대기]
-- **산출물**: 프로필등록 → 서술입력 → 미리보기 → 생성 → 열람 전체 플로우
+### S35b — 프론트-백 통합 E2E [완료]
+- **산출물**: 모바일 API 클라이언트의 와이어 포맷을 1:1로 검증하는 backend contract E2E 테스트 (`tests/test_s35b_frontend_contract_e2e.py`) — 로그인 → 프로필 등록 → `/stories/plan` → `/stories/plan/revise` → `/stories/generate` → 잡 폴링 → `GET /stories/{id}` → `GET /stories` → `DELETE /stories/{id}` 시퀀스. happy path + JWT 만료 + 동시 생성 차단(409) + 폴링 중간 상태 반복 등 타이밍/인증 케이스 포함.
+- **추가 산출물(세션 내 1회 수동)**: 실기기(Expo Go 또는 dev client) 위에서 Home → ProfileForm → PurposeSelect → DescriptiveInput → Preview → Generation → Viewer → Library → delete 를 1회 탭 하여 UI 층이 터지지 않는지 확인. 결과는 SESSION_LOG `실기기 수동 스모크` 필드에 기록.
 - **의존성**: S35a, S27~S34
+- **검증**: `pytest tests/test_s35b_frontend_contract_e2e.py` 전 케이스 통과 + 라우터 회귀 유지 + `ruff check`/`ruff format` 통과 + 수동 스모크 기록 존재
+- **비범위(Detox/Playwright 제외 사유)**: 실기기 UI E2E 자동화는 별도 인프라 태스크(I2)로 분리. 사유는 CLAUDE.md "파일 5개 이상 수정 금지" + mobile jest 미복구 지속 + 불안정한 E2E가 없는 것보다 나쁘다는 원칙.
 
 ### S36 — 가드레일 관리 어드민 [대기]
 - **산출물**: 감정아크/문체/안전규칙 CRUD 웹 UI
@@ -355,3 +392,23 @@
 - **의존성**: S35b
 
 **🔍 품질 게이트 G5**: 전체 플로우 수동 테스트 (시뮬레이터 + 실기기).
+
+---
+
+## Phase 8: 테스트 인프라 (I1~I2) — 후속 트랙, S38 블로커 아님
+
+> **배경**: S35b 는 backend contract E2E 로 프론트-백 계약 층을 덮었으나, UI 상태 관리·비동기 타이밍·네트워크 복구·네비게이션 꼬임 같은 모바일 런타임 층은 자동 회귀 방어 사각지대. 세션로그 S29~S34 5회 연속 "mobile jest 미복구" 문구가 기록된 것이 사각지대의 증거. 아래 두 태스크는 S35b 를 대체하지 않고 **실측 후 보강**하는 별도 트랙이다.
+
+### I1 — mobile 단위/컴포넌트 테스트 인프라 복구 [대기]
+- **산출물**: jest-expo 설정 복구, React Native Testing Library 도입, S28~S34 화면 중 최소 1개(권장: GenerationScreen 또는 LibraryScreen) 컴포넌트 테스트
+- **의존성**: 없음 (독립 트랙)
+- **배경**: S29 이후 5 세션 연속 "mobile jest 미복구" 세션로그 기록. `npx tsc --noEmit` 기반 컴파일 타임 TDD 로 대체 중이나 Rules of Hooks / 상태 reducer / 에러 분기 / Alert 흐름 같은 런타임 동작이 자동 회귀 방어 사각지대.
+- **검증**: `npm test` 통과, 최소 1개 스크린의 로딩/에러/성공 상태 분기 테스트 포함
+- **주의**: Expo managed workflow + Pretendard 폰트 로딩 등 네이티브 의존성이 테스트 환경에서 문제를 일으킬 수 있음. 모킹 전략 먼저 결정
+
+### I2 — 실기기 UI E2E 인프라 평가 및 도입 [대기]
+- **산출물**: Detox / Maestro / Playwright(expo-web) 세 도구 비교 리포트 + PoC 1개 선택 + `프로필 → 목적 선택 → 서술 입력` 3화면 시나리오 자동 실행
+- **의존성**: 없음 (I1 과 독립 — Detox 는 jest runner 와 별개)
+- **배경**: S35b 의 backend contract E2E 는 네트워크 에러/타임아웃 복구/앱 백그라운드 복귀/네비게이션 꼬임 층을 못 잡는다. 실기기 자동화가 필요한 시점은 S38 배포 이후 정기적 회귀가 필요해진 때.
+- **검증**: PoC 로 3화면 시나리오 자동 실행 성공 + CI 에 통합하지 않은 별도 트리거(수동)로 실행
+- **주의**: **"flaky 테스트는 없는 것보다 나쁘다"** — 안정화되지 않은 상태로 CI 에 붙이지 말 것. 로컬 수동 실행 → 안정 확인 → CI 통합은 별도 판단 지점
