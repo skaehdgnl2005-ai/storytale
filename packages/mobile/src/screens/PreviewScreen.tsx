@@ -14,9 +14,11 @@
  *   악의적 조작 방지는 서버가 한 번 더 검증하므로 이중 안전망.
  * - `MAX_REVISIONS` 상수는 `packages/mobile/src/api/stories.ts` 에서 백엔드와 동기화.
  *
- * 디자인: docs/visual-identity-guide-rn.md Section 12
- *   - warm pastel, borderRadius 14/20, Pretendard, shadowColor "#3E3225"
- *   - 최소 터치 타겟 52px, accessibilityLabel 필수
+ * 디자인: docs/visual-identity-guide-rn.md v3.1
+ *   - Card 컴포넌트로 장면 하이라이트
+ *   - PremiumCreateButton + SecondaryButton
+ *   - StyledInput for revision feedback
+ *   - 새 theme tokens (colors, shadows, radius, typography, spacing)
  */
 
 import React, { useCallback, useMemo, useState } from "react";
@@ -29,12 +31,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+import type { HomeTabParamList } from "../navigation/AppNavigator";
+import { colors, radius, shadows, spacing, typography } from "../theme";
 import { ApiClientError } from "../api/client";
 import { forceLogoutToLogin } from "../auth/bootstrap";
 import {
@@ -46,8 +47,12 @@ import {
   type ScenePlan,
   type StoryPreview,
 } from "../api/stories";
+import { Card } from "../components/Card";
+import { StyledInput } from "../components/StyledInput";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
+import { SecondaryButton } from "../components/SecondaryButton";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Preview">;
+type Props = NativeStackScreenProps<HomeTabParamList, "Preview">;
 
 // ---------------------------------------------------------------------------
 // 컴포넌트
@@ -194,18 +199,20 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
 
         {/* 요약 카드 */}
-        <View style={styles.summaryCard}>
+        <Card style={styles.summaryCard}>
           <Text style={styles.summaryText}>{preview.summary}</Text>
-        </View>
+        </Card>
 
         {/* 장면 하이라이트 */}
         <Text style={styles.sectionTitle}>이런 장면들이 펼쳐져요</Text>
         <View style={styles.scenesBlock}>
           {preview.scene_highlights.map((highlight, idx) => (
-            <View key={`${idx}-${highlight}`} style={styles.sceneCard}>
-              <Text style={styles.sceneNumber}>{idx + 1}</Text>
-              <Text style={styles.sceneText}>{highlight}</Text>
-            </View>
+            <Card key={`${idx}-${highlight}`} style={styles.sceneCard}>
+              <View style={styles.sceneRow}>
+                <Text style={styles.sceneNumber}>{idx + 1}</Text>
+                <Text style={styles.sceneText}>{highlight}</Text>
+              </View>
+            </Card>
           ))}
         </View>
 
@@ -213,25 +220,31 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
         <View style={styles.reviseSection}>
           <View style={styles.reviseHeaderRow}>
             <Text style={styles.sectionTitle}>마음에 들지 않는 부분이 있나요?</Text>
-            <Text
+            <View
               style={[
                 styles.revisionBadge,
                 !canRevise && styles.revisionBadgeLocked,
               ]}
-              accessibilityLabel={`수정 ${revisionCount} 회 사용, ${revisionsRemaining} 회 남음`}
             >
-              수정 {revisionCount}/{MAX_REVISIONS}
-            </Text>
+              <Text
+                style={[
+                  styles.revisionBadgeText,
+                  !canRevise && styles.revisionBadgeTextLocked,
+                ]}
+                accessibilityLabel={`수정 ${revisionCount} 회 사용, ${revisionsRemaining} 회 남음`}
+              >
+                수정 {revisionCount}/{MAX_REVISIONS}
+              </Text>
+            </View>
           </View>
 
           {canRevise ? (
             <>
-              <TextInput
-                style={[styles.input, overLimit && styles.inputError]}
+              <StyledInput
+                style={[styles.reviseInput, overLimit && styles.inputError]}
                 value={feedback}
                 onChangeText={setFeedback}
                 placeholder="예: 토끼 친구 대신 서준이가 나왔으면 좋겠어요"
-                placeholderTextColor={theme.colors.textSecondary}
                 multiline
                 textAlignVertical="top"
                 maxLength={PARENT_TEXT_MAX_LENGTH + 50}
@@ -251,33 +264,13 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
                 )}
               </View>
 
-              <Pressable
-                style={[
-                  styles.secondaryButton,
-                  !canSubmitRevision && styles.secondaryDisabled,
-                ]}
+              <SecondaryButton
+                label={revising ? "이야기를 다듬고 있어요 ✨" : "이렇게 바꿔주세요"}
                 onPress={handleRevise}
                 disabled={!canSubmitRevision}
-                accessibilityRole="button"
                 accessibilityLabel="이렇게 바꿔주세요"
-                accessibilityState={{
-                  disabled: !canSubmitRevision,
-                  busy: revising,
-                }}
-              >
-                {revising ? (
-                  <View style={styles.buttonRow}>
-                    <ActivityIndicator color={theme.colors.primary} />
-                    <Text style={styles.secondaryButtonText}>
-                      이야기를 다듬고 있어요 ✨
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.secondaryButtonText}>
-                    이렇게 바꿔주세요
-                  </Text>
-                )}
-              </Pressable>
+                style={styles.reviseButton}
+              />
             </>
           ) : (
             <View style={styles.lockedCard}>
@@ -291,15 +284,12 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
 
       {/* 고정 확정 CTA */}
       <View style={styles.footer}>
-        <Pressable
-          style={[styles.primaryButton, revising && styles.primaryDisabled]}
+        <PremiumCreateButton
+          label="이 이야기로 만들기"
           onPress={handleConfirm}
           disabled={revising}
-          accessibilityRole="button"
           accessibilityLabel="이 이야기로 만들기"
-        >
-          <Text style={styles.primaryButtonText}>이 이야기로 만들기</Text>
-        </Pressable>
+        />
       </View>
     </KeyboardAvoidingView>
   );
@@ -309,115 +299,85 @@ export const PreviewScreen: React.FC<Props> = ({ route, navigation }) => {
 // 스타일
 // ---------------------------------------------------------------------------
 
-const buttonShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  android: {
-    elevation: 4,
-  },
-});
-
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-  },
-  android: {
-    elevation: 2,
-  },
-});
-
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
   },
   childChip: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 13,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    fontSize: typography.size.xs,
+    color: colors.primary[500],
+    backgroundColor: colors.primary[50],
     alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    marginBottom: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+    marginBottom: spacing.md,
     overflow: "hidden",
   },
   title: {
     fontFamily: "Pretendard-Bold",
     fontSize: 26,
-    color: theme.colors.text,
+    color: colors.neutral[800],
     lineHeight: 34,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   metaRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: spacing.lg - 4,
   },
   metaBadge: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    backgroundColor: theme.colors.white,
+    fontSize: typography.size.xs,
+    color: colors.neutral[300],
+    backgroundColor: colors.neutral[0],
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: colors.neutral[100],
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
     overflow: "hidden",
   },
   summaryCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 28,
-    ...cardShadow,
+    marginBottom: spacing.xl - 4,
   },
   summaryText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.text,
+    fontSize: typography.size.sm + 1,
+    color: colors.neutral[800],
     lineHeight: 24,
   },
   sectionTitle: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.text,
-    marginBottom: 12,
+    fontSize: typography.size.base,
+    color: colors.neutral[800],
+    marginBottom: spacing.md,
   },
   scenesBlock: {
-    marginBottom: 28,
+    marginBottom: spacing.xl - 4,
     gap: 10,
   },
   sceneCard: {
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.base,
+  },
+  sceneRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 12,
+    gap: spacing.md,
   },
   sceneNumber: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 14,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    fontSize: typography.size.sm,
+    color: colors.primary[400],
+    backgroundColor: colors.primary[50],
     width: 28,
     height: 28,
     borderRadius: 14,
@@ -428,138 +388,94 @@ const styles = StyleSheet.create({
   sceneText: {
     flex: 1,
     fontFamily: "Pretendard-Medium",
-    fontSize: 14,
-    color: theme.colors.text,
+    fontSize: typography.size.sm,
+    color: colors.neutral[800],
     lineHeight: 20,
   },
   reviseSection: {
-    marginTop: 4,
+    marginTop: spacing.xs,
   },
   reviseHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   revisionBadge: {
-    fontFamily: "Pretendard-SemiBold",
-    fontSize: 12,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    backgroundColor: colors.primary[50],
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    overflow: "hidden",
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
   },
   revisionBadgeLocked: {
-    color: theme.colors.textSecondary,
-    backgroundColor: theme.colors.border,
+    backgroundColor: colors.neutral[100],
   },
-  input: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+  revisionBadgeText: {
+    fontFamily: "Pretendard-SemiBold",
+    fontSize: typography.size.xs,
+    color: colors.primary[500],
+  },
+  revisionBadgeTextLocked: {
+    color: colors.neutral[300],
+  },
+  reviseInput: {
     minHeight: 110,
-    fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.text,
     lineHeight: 22,
+    borderRadius: radius.md,
+    textAlignVertical: "top",
   },
   inputError: {
-    borderColor: "#D9534F",
+    borderColor: colors.semantic.error,
   },
   counterRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 8,
+    marginTop: spacing.sm,
     minHeight: 18,
   },
   counter: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 12,
+    fontSize: typography.size.xs,
   },
   counterMuted: {
-    color: theme.colors.textSecondary,
+    color: colors.neutral[300],
   },
   counterActive: {
-    color: theme.colors.text,
+    color: colors.neutral[800],
   },
   counterOver: {
-    color: "#D9534F",
+    color: colors.semantic.error,
   },
   counterWarning: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 12,
-    color: "#D9534F",
+    fontSize: typography.size.xs,
+    color: colors.semantic.error,
   },
-  secondaryButton: {
-    marginTop: 12,
-    backgroundColor: theme.colors.primaryLight,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: theme.colors.primary,
-  },
-  secondaryDisabled: {
-    opacity: 0.5,
-  },
-  secondaryButtonText: {
-    fontFamily: "Pretendard-SemiBold",
-    fontSize: 15,
-    color: theme.colors.primary,
+  reviseButton: {
+    marginTop: spacing.md,
   },
   lockedCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.md,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: theme.colors.border,
-    padding: 16,
+    borderColor: colors.neutral[100],
+    padding: spacing.base,
   },
   lockedText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 13,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.xs,
+    color: colors.neutral[300],
     lineHeight: 20,
     textAlign: "center",
   },
   footer: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 24,
-    backgroundColor: theme.colors.background,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    backgroundColor: colors.neutral[50],
     borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    ...buttonShadow,
-  },
-  primaryDisabled: {
-    opacity: 0.5,
-  },
-  primaryButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
-  },
-  buttonRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    borderTopColor: colors.neutral[100],
   },
 });

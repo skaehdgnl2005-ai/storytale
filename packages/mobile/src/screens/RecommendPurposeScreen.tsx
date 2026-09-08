@@ -1,37 +1,27 @@
 /**
- * 목적 선택 화면 (S29).
+ * 추천 목적 선택 화면 (R-UI Step 2).
  *
- * 부모가 4가지 목적 중 하나를 골라 다음 단계(서술형 입력, S30)로 진입한다.
- *
- * 디자인: docs/visual-identity-guide-rn.md v3.1
- *   - Card 컴포넌트 + selected prop 으로 선택 시각화
- *   - PremiumCreateButton 으로 Primary CTA
- *   - 새 theme tokens (colors, shadows, radius, typography, spacing)
- * 계약: docs/contracts/story-engine.ts IntentCategory (4종)
+ * PURPOSE_CARDS 4가지를 보여주고, 선택 후 RecommendInput으로 이동.
+ * PurposeSelectScreen과 유사하나 추천 맥락의 타이틀/서브타이틀 사용.
  */
 
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-} from "react-native";
+import { View, Text, StyleSheet, ScrollView } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { HomeTabParamList } from "../navigation/AppNavigator";
-import { colors, radius, spacing, typography } from "../theme";
+import { colors, radius, typography, spacing } from "../theme";
 import { PURPOSE_CARDS, type PurposeId } from "../data/purposes";
 import { Card } from "../components/Card";
 import { PremiumCreateButton } from "../components/PremiumCreateButton";
 
-type Props = NativeStackScreenProps<HomeTabParamList, "PurposeSelect">;
+type Props = NativeStackScreenProps<HomeTabParamList, "RecommendPurpose">;
 
-export const PurposeSelectScreen: React.FC<Props> = ({ navigation }) => {
+export const RecommendPurposeScreen: React.FC<Props> = ({ navigation }) => {
   const [selectedId, setSelectedId] = useState<PurposeId | null>(null);
 
   const handleContinue = () => {
     if (!selectedId) return;
-    navigation.navigate("DescriptiveInput", { purpose: selectedId });
+    navigation.navigate("RecommendInput", { purpose: selectedId });
   };
 
   return (
@@ -41,9 +31,9 @@ export const PurposeSelectScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>어떤 이야기를 담아볼까요?</Text>
+        <Text style={styles.title}>어떤 이야기가 필요한가요?</Text>
         <Text style={styles.subtitle}>
-          가장 가까운 마음을 하나만 골라주세요
+          가장 가까운 마음을 하나 골라주세요
         </Text>
 
         {PURPOSE_CARDS.map((card) => {
@@ -51,11 +41,11 @@ export const PurposeSelectScreen: React.FC<Props> = ({ navigation }) => {
           return (
             <Card
               key={card.id}
+              style={styles.card}
               selected={isSelected}
               onPress={() => setSelectedId(card.id)}
               accessibilityLabel={card.title}
               accessibilityHint={card.description}
-              style={styles.card}
             >
               <View style={styles.cardRow}>
                 <Text style={styles.cardEmoji}>{card.emoji}</Text>
@@ -109,7 +99,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontFamily: "Pretendard-Medium",
-    fontSize: typography.size.sm,
+    fontSize: typography.size.sm + 1,
     color: colors.neutral[300],
     marginBottom: spacing.lg,
   },
@@ -132,7 +122,7 @@ const styles = StyleSheet.create({
   },
   cardTitle: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: typography.size.base,
+    fontSize: typography.size.base + 1,
     color: colors.neutral[800],
     marginBottom: spacing.xs,
   },
@@ -141,7 +131,7 @@ const styles = StyleSheet.create({
   },
   cardDescription: {
     fontFamily: "Pretendard-Medium",
-    fontSize: typography.size.xs,
+    fontSize: typography.size.xs + 1,
     color: colors.neutral[300],
     lineHeight: 18,
   },

@@ -1,117 +1,320 @@
-import React from "react";
-import { View, Text, Pressable, StyleSheet, Platform } from "react-native";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+/**
+ * 홈 화면 (R-UI 개편 v3.1).
+ *
+ * ScrollView 기반 카드 대시보드.
+ * 핵심 CTA: "이야기의 힘을 빌려보세요" → 추천 플로우 진입.
+ * 프로필 필수화: 프로필이 없으면 프로필 등록을 먼저 유도한다.
+ */
 
-type Props = NativeStackScreenProps<RootStackParamList, "Home">;
+import React, { useState, useCallback } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  FlatList,
+  StyleSheet,
+  ActivityIndicator,
+} from "react-native";
+import { useFocusEffect, CommonActions } from "@react-navigation/native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import type { HomeTabParamList } from "../navigation/AppNavigator";
+import { colors, shadows, radius, typography, spacing } from "../theme";
+import { listProfiles } from "../api/profiles";
+import { listStories, type StoryListItem } from "../api/stories";
+import { Card } from "../components/Card";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
+
+type Props = NativeStackScreenProps<HomeTabParamList, "Home">;
+
+// ---------------------------------------------------------------------------
+// 헬퍼 — story id 해시로 커버 컬러 결정
+// ---------------------------------------------------------------------------
+
+const COVER_COLORS = [
+  colors.primary[300],
+  colors.primary[400],
+  colors.secondary[300],
+  colors.secondary[400],
+  colors.primary[100],
+  colors.secondary[50],
+] as const;
+
+function coverColorForId(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length];
+}
+
+// ---------------------------------------------------------------------------
+// 컴포넌트
+// ---------------------------------------------------------------------------
 
 export const HomeScreen: React.FC<Props> = ({ navigation }) => {
+  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [childName, setChildName] = useState<string | null>(null);
+  const [recentStories, setRecentStories] = useState<StoryListItem[]>([]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const profiles = await listProfiles();
+          if (cancelled) return;
+          if (profiles.length > 0) {
+            setHasProfile(true);
+            setChildName(profiles[0].name);
+          } else {
+            setHasProfile(false);
+            setChildName(null);
+          }
+        } catch {
+          if (!cancelled) setHasProfile(false);
+        }
+
+        // 최근 스토리 로드 (프로필 유무와 무관하게 시도)
+        try {
+          const result = await listStories({ limit: 5, offset: 0 });
+          if (!cancelled) setRecentStories(result.items);
+        } catch {
+          // 실패 시 빈 목록 유지 — 섹션이 숨겨지므로 에러 노출 불필요
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []),
+  );
+
+  // ── 로딩 ────────────────────────────────────────────
+  if (hasProfile === null) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={colors.primary[400]} size="large" />
+      </View>
+    );
+  }
+
+  // ── 프로필 없음 ─────────────────────────────────────
+  if (!hasProfile) {
+    return (
+      <View style={styles.noProfileContainer}>
+        {/* 마스코트 앵커 영역 */}
+        <View style={styles.mascotAnchor} />
+
+        {/* 콘텐츠 카드 */}
+        <View style={styles.contentCard}>
+          <Text style={styles.noProfileTitle}>아이를 알려주세요</Text>
+          <Text style={styles.noProfileSubtitle}>
+            아이에게 딱 맞는 이야기를 찾으려면{"\n"}프로필이 필요해요
+          </Text>
+
+          <PremiumCreateButton
+            label="아이 프로필 만들기"
+            onPress={() =>
+              navigation.dispatch(
+                CommonActions.navigate("MyPageTab", {
+                  screen: "ProfileForm",
+                }),
+              )
+            }
+            accessibilityLabel="아이 프로필 만들기"
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // ── 메인 대시보드 ───────────────────────────────────
   return (
-    <View style={styles.container}>
-      <Text style={styles.greeting}>첫 번째 이야기를 만들어볼까요?</Text>
+    <ScrollView
+      style={styles.scrollView}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* 인사 헤더 */}
+      <Text style={styles.greeting}>안녕, {childName}!</Text>
+      <Text style={styles.subtitle}>
+        오늘은 어떤 이야기를 만들어볼까요?
+      </Text>
 
-      <Pressable
-        style={styles.profileButton}
-        onPress={() => navigation.navigate("ProfileForm")}
-        accessibilityLabel="아이 프로필 만들기"
-        accessibilityRole="button"
+      {/* CTA 카드 1: 추천 플로우 */}
+      <Card
+        style={styles.ctaCard}
+        onPress={() => navigation.navigate("RecommendPurpose")}
+        accessibilityLabel="이야기의 힘을 빌려보세요"
       >
-        <Text style={styles.profileButtonText}>아이 프로필 만들기</Text>
-      </Pressable>
+        <Text style={styles.ctaCardTitle}>이야기의 힘을 빌려보세요</Text>
+        <Text style={styles.ctaCardDesc}>
+          아이의 상황에 맞는 이야기를 추천해드릴게요
+        </Text>
+      </Card>
 
-      <Pressable
-        style={styles.startButton}
-        onPress={() => navigation.navigate("PurposeSelect")}
-        accessibilityLabel="이야기 만들기 시작"
-        accessibilityRole="button"
-      >
-        <Text style={styles.startButtonText}>이야기 만들기</Text>
-      </Pressable>
+      {/* CTA 카드 2: 맞춤 동화 만들기 (PremiumCreateButton 스타일) */}
+      <View style={styles.premiumCtaWrap}>
+        <PremiumCreateButton
+          label="맞춤 동화 만들기"
+          onPress={() => navigation.navigate("PurposeSelect")}
+          accessibilityLabel="맞춤 동화 만들기"
+        />
+      </View>
 
-      <Pressable
-        style={styles.libraryButton}
-        onPress={() => navigation.navigate("Library")}
-        accessibilityLabel="내 서재 열기"
-        accessibilityRole="button"
-      >
-        <Text style={styles.libraryButtonText}>내 서재</Text>
-      </Pressable>
-    </View>
+      {/* 최근 이야기 섹션 */}
+      {recentStories.length > 0 && (
+        <View style={styles.recentSection}>
+          <Text style={styles.recentTitle}>최근 이야기</Text>
+          <FlatList
+            horizontal
+            data={recentStories}
+            keyExtractor={(item) => item.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.recentListContent}
+            renderItem={({ item }) => (
+              <Card
+                style={styles.recentCard}
+                onPress={() =>
+                  navigation.dispatch(
+                    CommonActions.navigate("Viewer", { storyId: item.id }),
+                  )
+                }
+                accessibilityLabel={`${item.title} 열기`}
+              >
+                <View
+                  style={[
+                    styles.recentCover,
+                    { backgroundColor: coverColorForId(item.id) },
+                  ]}
+                />
+                <Text style={styles.recentCardTitle} numberOfLines={2}>
+                  {item.title || "제목 없는 이야기"}
+                </Text>
+              </Card>
+            )}
+          />
+        </View>
+      )}
+    </ScrollView>
   );
 };
 
+// ---------------------------------------------------------------------------
+// 스타일
+// ---------------------------------------------------------------------------
+
 const styles = StyleSheet.create({
-  container: {
+  loadingContainer: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 24,
+  },
+
+  // ── 프로필 없음 ─────────────────────────────────────
+  noProfileContainer: {
+    flex: 1,
+    backgroundColor: colors.neutral[50],
+  },
+  mascotAnchor: {
+    height: 160,
+    backgroundColor: colors.primary[50],
+  },
+  contentCard: {
+    flex: 1,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    alignItems: "center",
+    ...shadows.softBase,
+  },
+  noProfileTitle: {
+    fontFamily: "Pretendard-Bold",
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
+    textAlign: "center",
+    marginBottom: spacing.sm,
+  },
+  noProfileSubtitle: {
+    fontFamily: "Pretendard-Medium",
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+  },
+
+  // ── 메인 대시보드 ───────────────────────────────────
+  scrollView: {
+    flex: 1,
+    backgroundColor: colors.neutral[50],
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing["2xl"],
   },
   greeting: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 22,
-    color: theme.colors.text,
-    textAlign: "center",
-    marginBottom: 32,
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
+    marginBottom: spacing.xs,
   },
-  profileButton: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    minHeight: 52,
-    justifyContent: "center",
-    alignItems: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#3E3225",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+  subtitle: {
+    fontFamily: "Pretendard-Medium",
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
+    marginBottom: spacing.lg,
   },
-  profileButtonText: {
+  ctaCard: {
+    marginBottom: spacing.base,
+  },
+  ctaCardTitle: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
+    fontSize: typography.size.lg,
+    color: colors.neutral[800],
+    marginBottom: spacing.xs,
   },
-  startButton: {
-    marginTop: 16,
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: theme.colors.primary,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    minHeight: 52,
-    justifyContent: "center",
-    alignItems: "center",
+  ctaCardDesc: {
+    fontFamily: "Pretendard-Medium",
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
   },
-  startButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.primary,
+  premiumCtaWrap: {
+    marginBottom: spacing.lg,
   },
-  // S34 — 내 서재 진입. 아웃라인 보다 약한 텍스트 버튼으로 1차/2차 CTA 와 시각적
-  // 우선순위를 낮춰 첫 사용자에게 "프로필 만들기 → 이야기 만들기" 흐름을 유도한다.
-  libraryButton: {
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    minHeight: 44,
-    justifyContent: "center",
-    alignItems: "center",
+
+  // ── 최근 이야기 ─────────────────────────────────────
+  recentSection: {
+    marginTop: spacing.sm,
   },
-  libraryButtonText: {
+  recentTitle: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
-    textDecorationLine: "underline",
+    fontSize: typography.size.base,
+    color: colors.neutral[800],
+    marginBottom: spacing.md,
+  },
+  recentListContent: {
+    gap: spacing.md,
+  },
+  recentCard: {
+    width: 120,
+    padding: spacing.sm,
+  },
+  recentCover: {
+    width: 68,
+    height: 68,
+    borderRadius: radius.md,
+    alignSelf: "center",
+    marginBottom: spacing.sm,
+  },
+  recentCardTitle: {
+    fontFamily: "Pretendard-Medium",
+    fontSize: typography.size.xs,
+    color: colors.neutral[800],
+    textAlign: "center",
+    lineHeight: 16,
   },
 });

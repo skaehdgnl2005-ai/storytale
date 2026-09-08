@@ -22,10 +22,11 @@
  *   friend_name, favorite_animal}` 전체를 요구하므로 getProfile 한 번 더.
  *   (현재 라우터는 요청 바디의 child 를 그대로 사용하므로 DB 일관성 보장 목적도 있음.)
  *
- * 디자인: docs/visual-identity-guide-rn.md Section 12
- *   - warm pastel, borderRadius 14/20, Pretendard, shadowColor "#3E3225"
- *   - 최소 터치 타겟 52px, accessibilityLabel 필수
- *   - 생성 상태 카피는 CLAUDE.md 톤 가이드(로딩: "이야기가 자라고 있어요 🌱")
+ * 디자인: docs/visual-identity-guide-rn.md v3.1
+ *   - mascotAnchor 영역 + contentCard 패턴
+ *   - Card 컴포넌트로 장면 카드
+ *   - PremiumCreateButton 으로 CTA
+ *   - 새 theme tokens (colors, shadows, radius, typography, spacing)
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -33,16 +34,16 @@ import {
   ActivityIndicator,
   LayoutAnimation,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   UIManager,
   View,
 } from "react-native";
+import { CommonActions } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+import type { HomeTabParamList } from "../navigation/AppNavigator";
+import { colors, radius, shadows, spacing, typography } from "../theme";
 import { ApiClientError } from "../api/client";
 import { forceLogoutToLogin } from "../auth/bootstrap";
 import { getProfile, type ChildProfile } from "../api/profiles";
@@ -53,8 +54,10 @@ import {
   type GeneratedScene,
   type JobStatusValue,
 } from "../api/stories";
+import { Card } from "../components/Card";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Generation">;
+type Props = NativeStackScreenProps<HomeTabParamList, "Generation">;
 
 // Android 에서 LayoutAnimation 을 쓰려면 experimental 플래그를 켜야 한다
 // (iOS 는 기본 활성). Expo SDK 54 기준으로도 여전히 필요한 가드.
@@ -240,12 +243,9 @@ export const GenerationScreen: React.FC<Props> = ({ route, navigation }) => {
       handleBackToHome();
       return;
     }
-    // Generation 스택은 뒤로가기 차단 화면이므로, Viewer 에서 back 할 때
-    // 사용자가 이 화면으로 돌아오지 않도록 스택을 [Home, Viewer] 로 재구성한다.
-    navigation.reset({
-      index: 1,
-      routes: [{ name: "Home" }, { name: "Viewer", params: { storyId } }],
-    });
+    // HomeTab 스택에서 루트(RootStack) 네비게이터를 통해 Viewer 로 이동.
+    // Viewer 는 RootStack 에 있으므로 getParent() 로 접근한다.
+    navigation.dispatch(CommonActions.navigate("Viewer", { storyId }));
   };
 
   // -------------------------------------------------------------------------
@@ -272,27 +272,32 @@ export const GenerationScreen: React.FC<Props> = ({ route, navigation }) => {
     <View style={styles.flex}>
       <ScrollView
         style={styles.flex}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 상단 헤더 */}
-        <Text style={styles.childChip}>{childName}를 위한 이야기</Text>
-        <Text style={styles.title}>{plan.title}</Text>
-        <Text style={styles.headerLine}>{headerLine}</Text>
+        {/* mascotAnchor 영역 */}
+        <View style={styles.mascotAnchor}>
+          <Text style={styles.childChip}>{childName}를 위한 이야기</Text>
+          <Text style={styles.mascotTitle}>{headerLine}</Text>
+          {isBusy && (
+            <ActivityIndicator
+              color={colors.primary[400]}
+              style={styles.mascotSpinner}
+              accessibilityLabel="생성 중"
+            />
+          )}
+        </View>
 
-        {/* 진행 상태 */}
-        <View
-          style={styles.progressCard}
-          accessibilityLiveRegion="polite"
-          accessibilityLabel={`${totalScenes}장 중 ${completedScenes}장 완성`}
-        >
-          <View style={styles.progressRow}>
-            {isBusy && (
-              <ActivityIndicator
-                color={theme.colors.primary}
-                accessibilityLabel="생성 중"
-              />
-            )}
+        {/* contentCard 영역 */}
+        <View style={styles.contentCard}>
+          <Text style={styles.title}>{plan.title}</Text>
+
+          {/* 진행 상태 */}
+          <View
+            style={styles.progressSection}
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={`${totalScenes}장 중 ${completedScenes}장 완성`}
+          >
             <Text style={styles.progressText}>
               {isFailed
                 ? (errorMessage ?? "잠시 후 다시 시도해주세요.")
@@ -300,73 +305,66 @@ export const GenerationScreen: React.FC<Props> = ({ route, navigation }) => {
                   ? `${totalScenes}장의 이야기가 모두 완성됐어요.`
                   : `${completedScenes}/${totalScenes}장을 쓰고 있어요`}
             </Text>
+            <View style={styles.progressBarTrack}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${progressPercent}%` },
+                  isFailed && styles.progressBarFailed,
+                ]}
+              />
+            </View>
           </View>
-          <View style={styles.progressBarTrack}>
-            <View
-              style={[
-                styles.progressBarFill,
-                { width: `${progressPercent}%` },
-                isFailed && styles.progressBarFailed,
-              ]}
-            />
-          </View>
-        </View>
 
-        {/* 완성된 장면 카드 (LayoutAnimation.spring 으로 등장) */}
-        {scenes.length > 0 && (
-          <Text style={styles.sectionTitle}>지금까지 만들어진 이야기</Text>
-        )}
-        <View style={styles.scenesBlock}>
-          {scenes.map((scene) => (
-            <View key={scene.scene_id} style={styles.sceneCard}>
-              <Text style={styles.sceneNumber}>{scene.page_number}</Text>
-              <Text style={styles.sceneText} numberOfLines={3}>
-                {scene.text}
+          {/* 완성된 장면 카드 (LayoutAnimation.spring 으로 등장) */}
+          {scenes.length > 0 && (
+            <Text style={styles.sectionTitle}>지금까지 만들어진 이야기</Text>
+          )}
+          <View style={styles.scenesBlock}>
+            {scenes.map((scene) => (
+              <Card key={scene.scene_id} style={styles.sceneCard}>
+                <View style={styles.sceneRow}>
+                  <Text style={styles.sceneNumber}>{scene.page_number}</Text>
+                  <Text style={styles.sceneText} numberOfLines={3}>
+                    {scene.text}
+                  </Text>
+                </View>
+              </Card>
+            ))}
+          </View>
+
+          {/* 아직 빈 상태 안내 */}
+          {isBusy && scenes.length === 0 && (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>
+                잠시만 기다려주세요. 첫 장면이 곧 도착해요.
               </Text>
             </View>
-          ))}
+          )}
         </View>
-
-        {/* 아직 빈 상태 안내 */}
-        {isBusy && scenes.length === 0 && (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>
-              잠시만 기다려주세요. 첫 장면이 곧 도착해요.
-            </Text>
-          </View>
-        )}
       </ScrollView>
 
       {/* 하단 고정 CTA */}
       <View style={styles.footer}>
         {isFailed ? (
-          <Pressable
-            style={styles.primaryButton}
+          <PremiumCreateButton
+            label="처음으로"
             onPress={handleBackToHome}
-            accessibilityRole="button"
             accessibilityLabel="처음으로"
-          >
-            <Text style={styles.primaryButtonText}>처음으로</Text>
-          </Pressable>
+          />
         ) : isDone ? (
-          <Pressable
-            style={styles.primaryButton}
+          <PremiumCreateButton
+            label="그림책 열어보기"
             onPress={handleOpenBook}
-            accessibilityRole="button"
             accessibilityLabel="그림책 열어보기"
-          >
-            <Text style={styles.primaryButtonText}>그림책 열어보기</Text>
-          </Pressable>
+          />
         ) : (
-          <Pressable
-            style={[styles.primaryButton, styles.primaryDisabled]}
+          <PremiumCreateButton
+            label="이야기를 만들고 있어요…"
+            onPress={() => {}}
             disabled
-            accessibilityRole="button"
             accessibilityLabel="이야기 만드는 중"
-            accessibilityState={{ disabled: true, busy: true }}
-          >
-            <Text style={styles.primaryButtonText}>이야기를 만들고 있어요…</Text>
-          </Pressable>
+          />
         )}
       </View>
     </View>
@@ -377,124 +375,107 @@ export const GenerationScreen: React.FC<Props> = ({ route, navigation }) => {
 // 스타일
 // ---------------------------------------------------------------------------
 
-const buttonShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  android: {
-    elevation: 4,
-  },
-});
-
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-  },
-  android: {
-    elevation: 2,
-  },
-});
-
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
   },
-  content: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 24,
+  scrollContent: {
+    flexGrow: 1,
+  },
+  // mascotAnchor: 상단 160px 영역
+  mascotAnchor: {
+    height: 160,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  mascotTitle: {
+    fontFamily: "Pretendard-Bold",
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
+    textAlign: "center",
+    marginTop: spacing.sm,
+  },
+  mascotSpinner: {
+    marginTop: spacing.md,
+  },
+  // contentCard: mascotAnchor 아래 메인 콘텐츠
+  contentCard: {
+    flex: 1,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
+    ...shadows.softHover,
   },
   childChip: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 13,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
-    alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    marginBottom: 12,
+    fontSize: typography.size.xs,
+    color: colors.primary[500],
+    backgroundColor: colors.primary[50],
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
     overflow: "hidden",
   },
   title: {
     fontFamily: "Pretendard-Bold",
     fontSize: 26,
-    color: theme.colors.text,
+    color: colors.neutral[800],
     lineHeight: 34,
-    marginBottom: 6,
+    marginBottom: spacing.base,
   },
-  headerLine: {
-    fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
-    marginBottom: 20,
-  },
-  progressCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-    ...cardShadow,
-  },
-  progressRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 14,
+  progressSection: {
+    marginBottom: spacing.lg,
   },
   progressText: {
-    flex: 1,
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 15,
-    color: theme.colors.text,
+    fontSize: typography.size.sm + 1,
+    color: colors.neutral[800],
     lineHeight: 22,
+    marginBottom: spacing.md,
   },
   progressBarTrack: {
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: theme.colors.border,
+    height: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.neutral[200],
     overflow: "hidden",
   },
   progressBarFill: {
     height: "100%",
-    backgroundColor: theme.colors.primary,
-    borderRadius: 999,
+    backgroundColor: colors.primary[400],
+    borderRadius: radius.full,
   },
   progressBarFailed: {
-    backgroundColor: theme.colors.error,
+    backgroundColor: colors.semantic.error,
   },
   sectionTitle: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.text,
-    marginBottom: 12,
+    fontSize: typography.size.base,
+    color: colors.neutral[800],
+    marginBottom: spacing.md,
   },
   scenesBlock: {
     gap: 10,
   },
   sceneCard: {
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.base,
+  },
+  sceneRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 12,
+    gap: spacing.md,
   },
   sceneNumber: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 14,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    fontSize: typography.size.sm,
+    color: colors.primary[400],
+    backgroundColor: colors.primary[50],
     width: 28,
     height: 28,
     borderRadius: 14,
@@ -505,50 +486,32 @@ const styles = StyleSheet.create({
   sceneText: {
     flex: 1,
     fontFamily: "Pretendard-Medium",
-    fontSize: 14,
-    color: theme.colors.text,
+    fontSize: typography.size.sm,
+    color: colors.neutral[800],
     lineHeight: 20,
   },
   emptyCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.md,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: theme.colors.border,
-    padding: 16,
+    borderColor: colors.neutral[100],
+    padding: spacing.base,
     alignItems: "center",
   },
   emptyText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 13,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.xs,
+    color: colors.neutral[300],
     lineHeight: 20,
     textAlign: "center",
   },
   footer: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 24,
-    backgroundColor: theme.colors.background,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    backgroundColor: colors.neutral[0],
     borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    ...buttonShadow,
-  },
-  primaryDisabled: {
-    opacity: 0.5,
-  },
-  primaryButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
+    borderTopColor: colors.neutral[100],
   },
 });

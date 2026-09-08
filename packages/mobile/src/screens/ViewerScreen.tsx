@@ -1,5 +1,5 @@
 /**
- * 그림책 뷰어 (S33).
+ * 그림책 뷰어 (S33 — v3.1 디자인).
  *
  * 흐름: Generation(완료) → Viewer → (back) Home
  *
@@ -10,10 +10,11 @@
  * - 페이지 넘기기: 가로 FlatList + `pagingEnabled`. 스와이프 한 번에 한 페이지.
  * - 각 페이지: 일러스트 영역(4:3) + 텍스트 카드. S26 이 채우기 전에는 placeholder.
  *
- * 디자인: docs/visual-identity-guide-rn.md Section 12
- *   - warm pastel, borderRadius 14/20, Pretendard, shadowColor "#3E3225"
- *   - 최소 터치 타겟 52px, accessibilityLabel 필수
- *   - 로딩: "이야기가 자라고 있어요 🌱"
+ * 디자인: storyViewer 전용 색상 적용.
+ *   - bg: #FFF9EE, text: #3D3225, accent: #E88D5A
+ *   - 스토리 텍스트: Cafe24Ssurround, 22px, lineHeight 44
+ *   - 페이지 인디케이터: 도트 형식
+ *   - 커스텀 헤더: "지우기" 좌측 + "X" 닫기 우측
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,7 +23,6 @@ import {
   Alert,
   FlatList,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -35,7 +35,7 @@ import {
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+import { colors, shadows, radius, typography, spacing, storyViewer } from "../theme";
 import { ApiClientError } from "../api/client";
 import { forceLogoutToLogin } from "../auth/bootstrap";
 import {
@@ -124,12 +124,12 @@ export const ViewerScreen: React.FC<Props> = ({ route, navigation }) => {
     [screenWidth],
   );
 
-  const handleBackToHome = useCallback((): void => {
-    navigation.popToTop();
+  const handleClose = useCallback((): void => {
+    navigation.goBack();
   }, [navigation]);
 
   // -------------------------------------------------------------------------
-  // 삭제 CTA (S34) — headerRight 의 "지우기" 버튼이 호출.
+  // 삭제 CTA (S34) — 커스텀 헤더의 "지우기" 텍스트가 호출.
   //
   // 진입 경로 두 가지:
   //   A) Generation → reset([Home, Viewer]): 이 경우 stack 깊이 = 2.
@@ -179,28 +179,6 @@ export const ViewerScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }, [navigation, story, storyId]);
 
-  // 스토리 로드 후 headerRight 에 "지우기" 버튼을 노출.
-  // 로딩/에러 상태에서는 헤더 액션을 보여주지 않는다(잘못 누름 방지).
-  useEffect(() => {
-    if (story === null) {
-      navigation.setOptions({ headerRight: undefined });
-      return;
-    }
-    navigation.setOptions({
-      headerRight: () => (
-        <Pressable
-          onPress={handleDelete}
-          accessibilityRole="button"
-          accessibilityLabel="이야기 지우기"
-          hitSlop={8}
-          style={styles.headerDeleteButton}
-        >
-          <Text style={styles.headerDeleteText}>지우기</Text>
-        </Pressable>
-      ),
-    });
-  }, [navigation, story, handleDelete]);
-
   // -------------------------------------------------------------------------
   // 페이지 렌더 — 가로 스와이프 1칸씩
   // -------------------------------------------------------------------------
@@ -209,7 +187,7 @@ export const ViewerScreen: React.FC<Props> = ({ route, navigation }) => {
     ({ item }: ListRenderItemInfo<StoryPageDetail>) => (
       <View style={[styles.page, { width: screenWidth }]}>
         <ScrollView
-          style={styles.flex}
+          style={styles.pageScrollContainer}
           contentContainerStyle={styles.pageScroll}
           showsVerticalScrollIndicator={false}
         >
@@ -248,7 +226,7 @@ export const ViewerScreen: React.FC<Props> = ({ route, navigation }) => {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={theme.colors.primary} size="large" />
+        <ActivityIndicator color={storyViewer.accent} size="large" />
         <Text style={styles.loadingText}>이야기를 펼치고 있어요 📖</Text>
       </View>
     );
@@ -261,12 +239,12 @@ export const ViewerScreen: React.FC<Props> = ({ route, navigation }) => {
           {errorMessage ?? "이야기를 불러올 수 없어요."}
         </Text>
         <Pressable
-          style={styles.primaryButton}
-          onPress={handleBackToHome}
+          style={styles.errorButton}
+          onPress={handleClose}
           accessibilityRole="button"
           accessibilityLabel="처음으로 돌아가기"
         >
-          <Text style={styles.primaryButtonText}>처음으로</Text>
+          <Text style={styles.errorButtonText}>처음으로</Text>
         </Pressable>
       </View>
     );
@@ -279,7 +257,8 @@ export const ViewerScreen: React.FC<Props> = ({ route, navigation }) => {
     renderPage={renderPage}
     getItemLayout={getItemLayout}
     handleMomentumScrollEnd={handleMomentumScrollEnd}
-    handleBackToHome={handleBackToHome}
+    handleClose={handleClose}
+    handleDelete={handleDelete}
   />;
 };
 
@@ -299,7 +278,8 @@ interface ViewerReadyProps {
   handleMomentumScrollEnd: (
     event: NativeSyntheticEvent<NativeScrollEvent>,
   ) => void;
-  handleBackToHome: () => void;
+  handleClose: () => void;
+  handleDelete: () => void;
 }
 
 const ViewerReady: React.FC<ViewerReadyProps> = ({
@@ -309,7 +289,8 @@ const ViewerReady: React.FC<ViewerReadyProps> = ({
   renderPage,
   getItemLayout,
   handleMomentumScrollEnd,
-  handleBackToHome,
+  handleClose,
+  handleDelete,
 }) => {
   const totalPages = story.pages.length;
   const clampedIndex = useMemo(
@@ -321,17 +302,35 @@ const ViewerReady: React.FC<ViewerReadyProps> = ({
   );
 
   return (
-    <View style={styles.flex}>
-      {/* 상단 제목 */}
-      <View style={styles.headerCard}>
-        <Text style={styles.title} numberOfLines={2}>
+    <View style={styles.viewerRoot}>
+      {/* 커스텀 헤더: "지우기" 좌측 + "X" 닫기 우측 */}
+      <View style={styles.customHeader}>
+        <Pressable
+          onPress={handleDelete}
+          accessibilityRole="button"
+          accessibilityLabel="이야기 지우기"
+          hitSlop={8}
+          style={styles.headerAction}
+        >
+          <Text style={styles.headerDeleteText}>지우기</Text>
+        </Pressable>
+        <Text style={styles.headerTitle} numberOfLines={1}>
           {story.title}
         </Text>
+        <Pressable
+          onPress={handleClose}
+          accessibilityRole="button"
+          accessibilityLabel="닫기"
+          hitSlop={8}
+          style={styles.headerAction}
+        >
+          <Text style={styles.headerCloseText}>X</Text>
+        </Pressable>
       </View>
 
       {/* 본문 — 가로 스와이프 페이지 */}
       <FlatList
-        style={styles.flex}
+        style={styles.pageList}
         data={story.pages}
         keyExtractor={(item) => item.id}
         renderItem={renderPage}
@@ -349,22 +348,22 @@ const ViewerReady: React.FC<ViewerReadyProps> = ({
         extraData={screenWidth}
       />
 
-      {/* 하단 페이지 표시 + Home 복귀 */}
+      {/* 하단 도트 인디케이터 */}
       <View style={styles.footer}>
-        <Text
-          style={styles.pageIndicator}
+        <View
+          style={styles.dotContainer}
           accessibilityLabel={`${clampedIndex + 1}페이지 / 전체 ${totalPages}페이지`}
         >
-          {clampedIndex + 1} / {totalPages}
-        </Text>
-        <Pressable
-          style={styles.homeButton}
-          onPress={handleBackToHome}
-          accessibilityRole="button"
-          accessibilityLabel="처음으로 돌아가기"
-        >
-          <Text style={styles.homeButtonText}>처음으로</Text>
-        </Pressable>
+          {story.pages.map((_, idx) => (
+            <View
+              key={idx}
+              style={[
+                styles.dot,
+                idx === clampedIndex ? styles.dotActive : styles.dotInactive,
+              ]}
+            />
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -374,84 +373,113 @@ const ViewerReady: React.FC<ViewerReadyProps> = ({
 // 스타일
 // ---------------------------------------------------------------------------
 
-const buttonShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  android: {
-    elevation: 4,
-  },
-});
-
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-  },
-  android: {
-    elevation: 2,
-  },
-});
-
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
+  // ── 공통 ────────────────────────────────────────────
   centered: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: storyViewer.bg,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24,
-    gap: 16,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.base,
   },
   loadingText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.sm,
+    color: storyViewer.text,
     textAlign: "center",
   },
   errorText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.text,
+    fontSize: typography.size.sm,
+    color: storyViewer.text,
     textAlign: "center",
     lineHeight: 22,
   },
-  headerCard: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 12,
-    backgroundColor: theme.colors.background,
+  errorButton: {
+    backgroundColor: storyViewer.accent,
+    borderRadius: radius.md,
+    paddingVertical: spacing.base,
+    paddingHorizontal: spacing.xl,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadows.accentGlow,
   },
-  title: {
+  errorButtonText: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 22,
-    color: theme.colors.text,
-    lineHeight: 30,
+    fontSize: typography.size.base,
+    color: colors.neutral[0],
+  },
+
+  // ── 뷰어 루트 ──────────────────────────────────────
+  viewerRoot: {
+    flex: 1,
+    backgroundColor: storyViewer.bg,
+  },
+
+  // ── 커스텀 헤더 ─────────────────────────────────────
+  customHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing["2xl"],
+    paddingBottom: spacing.md,
+    backgroundColor: storyViewer.bg,
+  },
+  headerAction: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerDeleteText: {
+    fontFamily: "Pretendard-SemiBold",
+    fontSize: typography.size.sm,
+    color: colors.semantic.error,
+  },
+  headerTitle: {
+    flex: 1,
+    fontFamily: "Pretendard-SemiBold",
+    fontSize: typography.size.base,
+    color: storyViewer.text,
+    textAlign: "center",
+    marginHorizontal: spacing.sm,
+  },
+  headerCloseText: {
+    fontFamily: "Pretendard-Bold",
+    fontSize: typography.size.lg,
+    color: storyViewer.text,
+  },
+
+  // ── 페이지 ──────────────────────────────────────────
+  pageList: {
+    flex: 1,
+    backgroundColor: storyViewer.bg,
   },
   page: {
     flex: 1,
   },
+  pageScrollContainer: {
+    flex: 1,
+    backgroundColor: storyViewer.bg,
+  },
   pageScroll: {
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
   },
   illustrationWrap: {
     width: "100%",
     aspectRatio: 4 / 3,
-    borderRadius: 20,
+    borderRadius: radius.lg,
     overflow: "hidden",
-    marginBottom: 16,
-    backgroundColor: theme.colors.primaryLight,
-    ...cardShadow,
+    marginBottom: spacing.base,
+    backgroundColor: colors.primary[50],
+    ...shadows.softBase,
   },
   illustration: {
     width: "100%",
@@ -461,103 +489,63 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: spacing.sm,
   },
   placeholderEmoji: {
     fontSize: 40,
   },
   placeholderText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 13,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.xs,
+    color: colors.neutral[300],
   },
   textCard: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 20,
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    ...cardShadow,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    ...shadows.softBase,
   },
   pageNumberLabel: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 12,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    fontSize: typography.size.xs,
+    color: storyViewer.accent,
+    backgroundColor: colors.primary[50],
     alignSelf: "flex-start",
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
     overflow: "hidden",
-    marginBottom: 10,
+    marginBottom: spacing.md,
   },
   pageText: {
-    fontFamily: "Pretendard-Medium",
-    fontSize: 16,
-    color: theme.colors.text,
-    lineHeight: 26,
+    fontFamily: "Cafe24Ssurround",
+    fontSize: typography.size.xl,
+    color: storyViewer.text,
+    lineHeight: 44,
   },
+
+  // ── 하단 도트 인디케이터 ────────────────────────────
   footer: {
+    alignItems: "center",
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    backgroundColor: storyViewer.bg,
+  },
+  dotContainer: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 24,
-    backgroundColor: theme.colors.background,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-    gap: 12,
+    gap: spacing.sm,
   },
-  pageIndicator: {
-    fontFamily: "Pretendard-SemiBold",
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: theme.colors.white,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    overflow: "hidden",
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: radius.full,
   },
-  homeButton: {
-    flex: 1,
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    ...buttonShadow,
+  dotActive: {
+    backgroundColor: colors.primary[400],
   },
-  homeButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 16,
-    color: theme.colors.white,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    ...buttonShadow,
-  },
-  primaryButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
-  },
-  headerDeleteButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  headerDeleteText: {
-    fontFamily: "Pretendard-SemiBold",
-    fontSize: 15,
-    color: theme.colors.error,
+  dotInactive: {
+    backgroundColor: colors.neutral[300],
   },
 });

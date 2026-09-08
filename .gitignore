@@ -49,3 +49,7 @@ htmlcov/
 
 # --- 기타 ---
 *.log
+
+# --- SQLite 로컬 DB (커밋 금지) ---
+*.db
+*.sqlite

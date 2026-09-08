@@ -4,6 +4,53 @@
 
 ---
 
+## R-UI — 추천 프론트엔드 UI (2026-04-14)
+
+### 완료된 것
+- **API 클라이언트** — `packages/mobile/src/api/recommendations.ts::createRecommendation()`. 백엔드 `POST /api/v1/recommendations` (R7)과 1:1 매칭. 와이어 타입: `BookMetadata`, `SituationTag`, `BookRecommendation`, `IntentAnalysis`, `RecommendationResult`.
+- **RecommendPurposeScreen** — `packages/mobile/src/screens/RecommendPurposeScreen.tsx`. PURPOSE_CARDS 4종 재활용, 추천 맥락 타이틀("어떤 이야기가 필요한가요?"). 선택 후 RecommendInput으로 이동.
+- **RecommendInputScreen** — `packages/mobile/src/screens/RecommendInputScreen.tsx`. 목적별 placeholder 제공. 프로필 `listProfiles()` 조회 → child_age 자동 획득 → `createRecommendation()` 호출. 프로필 없으면 ProfileForm으로 유도.
+- **RecommendResultScreen** — `packages/mobile/src/screens/RecommendResultScreen.tsx`. (1) 키워드 뱃지 (emotionalKeywords), (2) 추천 도서 카드 3권 (표지+제목+작가+whyThisBook), (3) 독후 가이드 아코디언 (readingQuestions+conversationGuide), (4) 맞춤 동화 CTA (secondary 컬러, customStoryPrompt 표시).
+- **맞춤 동화 shortcut** — RecommendResult에서 "맞춤 동화 만들기" 탭 시 `createStoryPlan(intentAnalysis 기반)` → Preview로 직행. PurposeSelect/DescriptiveInput 건너뜀.
+- **Home 화면 개편** — 프로필 필수화 (프로필 없으면 등록만 표시). 메인 CTA "이야기의 힘을 빌려보세요" → RecommendPurpose. 기존 "맞춤 동화 만들기", "내 서재"는 보조 CTA로 유지. `useFocusEffect`로 프로필 상태 매번 갱신.
+- **네비게이션 확장** — `AppNavigator.tsx`에 `RecommendPurpose`, `RecommendInput`, `RecommendResult` 3개 라우트 추가. `RecommendResult` params에 `RecommendationResult` + `childId` + `childName` 전달.
+
+### TDD 워크플로우
+1. **RED** — `AppNavigator.tsx`에 3개 화면 import 추가 → `npx tsc --noEmit` → `Cannot find module` 에러 확인.
+2. **GREEN 1** — `api/recommendations.ts` 신규 (와이어 타입 + createRecommendation 함수).
+3. **GREEN 2** — `RecommendPurposeScreen.tsx` 신규.
+4. **GREEN 3** — `RecommendInputScreen.tsx` 신규.
+5. **GREEN 4** — `RecommendResultScreen.tsx` 신규.
+6. **GREEN 5** — `HomeScreen.tsx` 개편 (프로필 필수화 + 추천 CTA).
+7. **검증** — `npx tsc --noEmit` → exit 0.
+
+### 구현 요약
+- **주요 파일**:
+  - `packages/mobile/src/api/recommendations.ts::createRecommendation(input: CreateRecommendationRequest)` — `POST /api/v1/recommendations` 호출
+  - `packages/mobile/src/screens/RecommendPurposeScreen.tsx::RecommendPurposeScreen` — PURPOSE_CARDS 기반 선택 UI
+  - `packages/mobile/src/screens/RecommendInputScreen.tsx::RecommendInputScreen` — 서술 입력 + API 호출 + 결과 전달
+  - `packages/mobile/src/screens/RecommendResultScreen.tsx::RecommendResultScreen` — 키워드+도서+가이드+CTA 결과 화면
+  - `packages/mobile/src/screens/RecommendResultScreen.tsx::BookCard` — 도서 카드 컴포넌트 (아코디언 가이드 포함)
+  - `packages/mobile/src/screens/HomeScreen.tsx::HomeScreen` — 프로필 필수화 + 추천 메인 CTA
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — 3개 라우트 추가 (RecommendPurpose/RecommendInput/RecommendResult)
+- **계약 대비 변경점**: `docs/contracts/book-recommendation.ts`의 `BookRecommendationResult` 인터페이스를 `RecommendationResult` 와이어 타입으로 1:1 매칭. snake_case 그대로 사용 (camelCase 변환 없음, 기존 패턴 준수).
+- **환경변수**: 추가 없음.
+- **의존 모듈 사용**: `api/client.ts::apiFetch` (JWT 자동 첨부), `api/profiles.ts::listProfiles` (프로필 조회), `api/stories.ts::createStoryPlan` (shortcut용), `data/purposes.ts::PURPOSE_CARDS` (4종 카드 재활용).
+
+### 설계 결정 메모
+- **추천이 초기 유입 핵심**: 사용자 판단에 따라 Home CTA 최상단을 추천 플로우("이야기의 힘을 빌려보세요")로 배치. 맞춤 동화 만들기는 보조 CTA로 강등. 무료 가치(기존 동화 추천+독후 가이드) → 유료 전환(맞춤 동화) 퍼널 설계.
+- **프로필 필수화**: 추천 API에 `child_age`가 필수이므로 Home 진입 시 프로필 존재 여부 확인. 없으면 추천/동화 만들기 버튼 대신 프로필 등록만 노출. `useFocusEffect`로 화면 복귀 시마다 갱신.
+- **맞춤 동화 shortcut**: RecommendResult의 `intentAnalysis`에서 `intent_category`를 `PurposeId`로 캐스팅, `emotional_keywords.join(", ")`를 `parent_text`로 사용해 `createStoryPlan` 호출. 기존 PurposeSelect→DescriptiveInput 2단계를 건너뛰어 전환 마찰 최소화.
+- **CTA 컬러 분리**: 추천 도서는 primary(#FFA94D) 톤, 맞춤 동화 CTA는 secondary(#A07DE8) 톤으로 시각적 차별화. 맞춤 동화가 "더 특별한 옵션"임을 암시.
+
+### 다음 세션에 알려줄 것
+- **G4.5 범위 확장 완료**: 기존 경로 A(맞춤 동화)에 더해 경로 B(추천→전환 shortcut) + 프로필 필수화 확인이 G4.5 체크리스트에 추가됨. 실기기 스모크 시 두 경로 모두 검증 필요.
+- **추천 경로 검증 포인트**: (1) 추천 API LLM 호출 포함으로 응답 시간 5~15초 — 로딩 UX 확인, (2) RecommendResult → "맞춤 동화 만들기" shortcut → Preview 데이터 정상 표시, (3) 추천 결과 없을 때 에러 핸들링.
+- **품질 게이트 G3.5 이미 PASS**: 10개 시나리오 추천 품질 수동 검증은 G3.5/G3.5-fix 세션에서 9/10 PASS 완료 상태. 추가 검증 불필요.
+- **프로필 필수화 UX 보강 가능**: 현재 프로필 등록 후 Home 복귀 시 `useFocusEffect`로 상태 갱신되지만, ProfileFormScreen에서 등록 성공 후 바로 RecommendPurpose로 이동하는 shortcut도 고려 가능.
+
+---
+
 ## S27b 세션 2 — 이메일+비밀번호 로그인 모바일 (2026-04-11)
 
 ### 완료된 것
@@ -130,7 +177,7 @@
 - [x] `LoginScreen.tsx` 신규 파일 생성 + `AppNavigator` 등록
 - [x] `App.tsx` 부트스트랩 단계 배선
 - [x] `tokenStore.ts` + `bootstrap.ts` 신규 생성
-- [ ] **실기기 수동 스모크 (LoginScreen → 회원가입 → 9화면 체크리스트)** — 사용자 수행 대기 중
+- [x] **실기기 수동 스모크 (LoginScreen → 회원가입 → 9화면 체크리스트)** — 2026-04-13 완료. iOS 실기기 + Expo Go + 핫스팟(172.20.10.3). LoginScreen 첫 화면 표시 / signup 성공 → Home / 프로필 등록 / 내 서재 / 앱 재시작 후 자동 로그인(Home 바로 진입) 전부 정상. 이야기 만들기(Claude API 호출)만 핫스팟 네트워크 타임아웃으로 건너뜀 — S35b 에서 이미 동일 플로우 검증 완료이므로 S27b 판정에 영향 없음.
 
 ---
 

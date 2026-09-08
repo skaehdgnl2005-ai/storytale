@@ -9,24 +9,25 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  TextInput,
   Image,
   Pressable,
   StyleSheet,
   ScrollView,
   Alert,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+import type { MyPageTabParamList } from "../navigation/AppNavigator";
+import { colors, radius, shadows, typography, spacing } from "../theme";
 import { createProfile, uploadPhoto } from "../api/profiles";
 import { ApiClientError } from "../api/client";
+import { Card } from "../components/Card";
+import { StyledInput } from "../components/StyledInput";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
 
-type Props = NativeStackScreenProps<RootStackParamList, "ProfileForm">;
+type Props = NativeStackScreenProps<MyPageTabParamList, "ProfileForm">;
 
 type Gender = "male" | "female";
 
@@ -135,122 +136,112 @@ export const ProfileFormScreen: React.FC<Props> = ({ navigation }) => {
           )}
         </Pressable>
 
-        {/* 이름 */}
-        <Text style={styles.label}>이름 *</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="아이의 이름"
-          placeholderTextColor={theme.colors.placeholder}
-          maxLength={50}
-          accessibilityLabel="아이 이름 입력"
-        />
+        {/* 기본 정보 섹션 */}
+        <Card style={styles.formSection}>
+          <Text style={styles.sectionHeader}>기본 정보</Text>
 
-        {/* 나이 */}
-        <Text style={styles.label}>나이 *</Text>
-        <TextInput
-          style={styles.input}
-          value={age}
-          onChangeText={setAge}
-          placeholder="1~12"
-          placeholderTextColor={theme.colors.placeholder}
-          keyboardType="number-pad"
-          maxLength={2}
-          accessibilityLabel="아이 나이 입력"
-        />
+          <Text style={styles.label}>이름 *</Text>
+          <StyledInput
+            value={name}
+            onChangeText={setName}
+            placeholder="아이의 이름"
+            maxLength={50}
+            accessibilityLabel="아이 이름 입력"
+          />
 
-        {/* 성별 */}
-        <Text style={styles.label}>성별 *</Text>
-        <View style={styles.genderRow}>
-          <Pressable
-            style={[
-              styles.genderButton,
-              gender === "male" && styles.genderSelected,
-            ]}
-            onPress={() => setGender("male")}
-            accessibilityLabel="남자아이"
-            accessibilityRole="button"
-          >
-            <Text
+          <Text style={styles.label}>나이 *</Text>
+          <StyledInput
+            value={age}
+            onChangeText={setAge}
+            placeholder="1~12"
+            keyboardType="number-pad"
+            maxLength={2}
+            accessibilityLabel="아이 나이 입력"
+          />
+
+          <Text style={styles.label}>성별 *</Text>
+          <View style={styles.genderRow}>
+            <Pressable
               style={[
-                styles.genderText,
-                gender === "male" && styles.genderTextSelected,
+                styles.genderButton,
+                gender === "male" && styles.genderSelected,
               ]}
+              onPress={() => setGender("male")}
+              accessibilityLabel="남자아이"
+              accessibilityRole="button"
             >
-              남자아이
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.genderButton,
-              gender === "female" && styles.genderSelected,
-            ]}
-            onPress={() => setGender("female")}
-            accessibilityLabel="여자아이"
-            accessibilityRole="button"
-          >
-            <Text
+              <Text
+                style={[
+                  styles.genderText,
+                  gender === "male" && styles.genderTextSelected,
+                ]}
+              >
+                남자아이
+              </Text>
+            </Pressable>
+            <Pressable
               style={[
-                styles.genderText,
-                gender === "female" && styles.genderTextSelected,
+                styles.genderButton,
+                gender === "female" && styles.genderSelected,
               ]}
+              onPress={() => setGender("female")}
+              accessibilityLabel="여자아이"
+              accessibilityRole="button"
             >
-              여자아이
-            </Text>
-          </Pressable>
-        </View>
+              <Text
+                style={[
+                  styles.genderText,
+                  gender === "female" && styles.genderTextSelected,
+                ]}
+              >
+                여자아이
+              </Text>
+            </Pressable>
+          </View>
+        </Card>
 
-        {/* 선택 필드 */}
-        <Text style={styles.sectionHeader}>더 알려주시면 좋아요</Text>
+        {/* 선택 정보 섹션 */}
+        <Card style={styles.formSection}>
+          <Text style={styles.sectionHeader}>더 알려주시면 좋아요</Text>
 
-        <Text style={styles.label}>애착 물건</Text>
-        <TextInput
-          style={styles.input}
-          value={comfortObject}
-          onChangeText={setComfortObject}
-          placeholder="예: 토니 곰인형"
-          placeholderTextColor={theme.colors.placeholder}
-          maxLength={100}
-          accessibilityLabel="애착 물건 입력"
-        />
+          <Text style={styles.label}>애착 물건</Text>
+          <StyledInput
+            value={comfortObject}
+            onChangeText={setComfortObject}
+            placeholder="예: 토니 곰인형"
+            maxLength={100}
+            accessibilityLabel="애착 물건 입력"
+          />
 
-        <Text style={styles.label}>친한 친구 이름</Text>
-        <TextInput
-          style={styles.input}
-          value={friendName}
-          onChangeText={setFriendName}
-          placeholder="예: 민준이"
-          placeholderTextColor={theme.colors.placeholder}
-          maxLength={50}
-          accessibilityLabel="친한 친구 이름 입력"
-        />
+          <Text style={styles.label}>친한 친구 이름</Text>
+          <StyledInput
+            value={friendName}
+            onChangeText={setFriendName}
+            placeholder="예: 민준이"
+            maxLength={50}
+            accessibilityLabel="친한 친구 이름 입력"
+          />
 
-        <Text style={styles.label}>좋아하는 동물</Text>
-        <TextInput
-          style={styles.input}
-          value={favoriteAnimal}
-          onChangeText={setFavoriteAnimal}
-          placeholder="예: 토끼"
-          placeholderTextColor={theme.colors.placeholder}
-          maxLength={50}
-          accessibilityLabel="좋아하는 동물 입력"
-        />
+          <Text style={styles.label}>좋아하는 동물</Text>
+          <StyledInput
+            value={favoriteAnimal}
+            onChangeText={setFavoriteAnimal}
+            placeholder="예: 토끼"
+            maxLength={50}
+            accessibilityLabel="좋아하는 동물 입력"
+          />
+        </Card>
 
         {/* 제출 버튼 */}
-        <Pressable
-          style={[styles.submitButton, !isValid && styles.submitDisabled]}
-          onPress={handleSubmit}
-          disabled={!isValid || loading}
-          accessibilityLabel="프로필 만들기"
-          accessibilityRole="button"
-        >
-          {loading ? (
-            <ActivityIndicator color={theme.colors.white} />
-          ) : (
-            <Text style={styles.submitText}>프로필 만들기</Text>
-          )}
-        </Pressable>
+        <View style={styles.submitWrapper}>
+          <PremiumCreateButton
+            label="프로필 만들기"
+            onPress={handleSubmit}
+            disabled={!isValid}
+            loading={loading}
+            accessibilityLabel="프로필 만들기"
+          />
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -262,146 +253,103 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 48,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing["2xl"],
   },
   title: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 24,
-    color: theme.colors.text,
-    marginBottom: 8,
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
+    marginBottom: spacing.sm,
   },
   subtitle: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
-    marginBottom: 32,
+    fontSize: typography.size.sm + 1,
+    color: colors.neutral[300],
+    marginBottom: spacing.xl,
   },
-  label: {
-    fontFamily: "Pretendard-SemiBold",
-    fontSize: 14,
-    color: theme.colors.text,
-    marginBottom: 8,
-    marginTop: 16,
+  formSection: {
+    marginBottom: spacing.base,
   },
   sectionHeader: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 16,
-    color: theme.colors.textSecondary,
-    marginTop: 32,
-    marginBottom: 8,
+    fontSize: typography.size.base,
+    color: colors.neutral[800],
+    marginBottom: spacing.base,
   },
-  input: {
-    fontFamily: "Pretendard-Medium",
-    fontSize: 16,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#3E3225",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
+  label: {
+    fontFamily: "Pretendard-SemiBold",
+    fontSize: typography.size.sm,
+    color: colors.neutral[800],
+    marginBottom: spacing.sm,
+    marginTop: spacing.base,
   },
   genderRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: spacing.md,
   },
   genderButton: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.white,
+    paddingVertical: spacing.md + 2,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.neutral[200],
+    backgroundColor: colors.neutral[0],
     alignItems: "center",
     minHeight: 44,
     justifyContent: "center",
+    ...shadows.softBase,
   },
   genderSelected: {
-    borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    borderColor: colors.primary[400],
+    backgroundColor: colors.primary[50],
   },
   genderText: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.sm + 1,
+    color: colors.neutral[300],
   },
   genderTextSelected: {
-    color: theme.colors.primary,
+    color: colors.primary[400],
   },
-  submitButton: {
-    marginTop: 32,
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: "center",
-    minHeight: 52,
-    justifyContent: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#3E3225",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  submitDisabled: {
-    opacity: 0.5,
-  },
-  submitText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
+  submitWrapper: {
+    marginTop: spacing.xl,
   },
   photoButton: {
     alignSelf: "center",
-    marginBottom: 16,
+    marginBottom: spacing.base,
   },
   photoPreview: {
     width: 100,
     height: 100,
-    borderRadius: 50,
-    backgroundColor: theme.colors.border,
+    borderRadius: radius.full,
+    backgroundColor: colors.neutral[100],
   },
   photoPlaceholder: {
     width: 100,
     height: 100,
-    borderRadius: 50,
-    backgroundColor: theme.colors.white,
+    borderRadius: radius.full,
+    backgroundColor: colors.neutral[0],
     borderWidth: 2,
-    borderColor: theme.colors.border,
+    borderColor: colors.neutral[200],
     borderStyle: "dashed",
     alignItems: "center",
     justifyContent: "center",
+    ...shadows.softBase,
   },
   photoPlaceholderIcon: {
     fontSize: 28,
-    color: theme.colors.placeholder,
+    color: colors.neutral[200],
     lineHeight: 32,
   },
   photoPlaceholderText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 12,
-    color: theme.colors.placeholder,
+    fontSize: typography.size.xs,
+    color: colors.neutral[200],
     marginTop: 2,
   },
 });

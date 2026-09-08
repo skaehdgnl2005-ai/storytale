@@ -14,9 +14,10 @@
  *   - 마운트 시 listProfiles() → 첫 프로필 자동 사용 + 화면 상단에 이름 노출.
  *   - 다중 자녀 가구는 S31 picker 도입 후 해소 (SESSION_LOG에 기록).
  *
- * 디자인: docs/visual-identity-guide-rn.md Section 12
- *   - warm pastel, borderRadius 14/20, Pretendard, shadowColor "#3E3225"
- *   - 최소 터치 타겟 52px, accessibilityLabel 필수
+ * 디자인: docs/visual-identity-guide-rn.md v3.1
+ *   - StyledInput (multiline) + 프로그레스 바 문자 카운트
+ *   - PremiumCreateButton 으로 Primary CTA
+ *   - 새 theme tokens (colors, shadows, radius, typography, spacing)
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -29,13 +30,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
+import { CommonActions } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/AppNavigator";
+import type { HomeTabParamList } from "../navigation/AppNavigator";
 import type { PurposeId } from "../data/purposes";
-import { theme } from "../theme";
+import { colors, radius, shadows, spacing, typography } from "../theme";
 import { ApiClientError } from "../api/client";
 import { forceLogoutToLogin } from "../auth/bootstrap";
 import { listProfiles, type ChildProfile } from "../api/profiles";
@@ -44,8 +45,11 @@ import {
   REJECTED_INTENT_CODE,
   createStoryPlan,
 } from "../api/stories";
+import { StyledInput } from "../components/StyledInput";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
+import { Card } from "../components/Card";
 
-type Props = NativeStackScreenProps<RootStackParamList, "DescriptiveInput">;
+type Props = NativeStackScreenProps<HomeTabParamList, "DescriptiveInput">;
 
 // ---------------------------------------------------------------------------
 // 목적별 가이드 카피 — `Record<PurposeId, ...>` 가 컴파일 타임에 4종 모두 강제.
@@ -227,13 +231,22 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
   };
 
   // -------------------------------------------------------------------------
+  // 진행률 계산 (문자 카운트 프로그레스 바)
+  // -------------------------------------------------------------------------
+
+  const progressPercent = Math.min(
+    100,
+    Math.round((text.length / PARENT_TEXT_MAX_LENGTH) * 100),
+  );
+
+  // -------------------------------------------------------------------------
   // 렌더
   // -------------------------------------------------------------------------
 
   if (profileState.kind === "loading") {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={theme.colors.primary} />
+        <ActivityIndicator color={colors.primary[400]} />
       </View>
     );
   }
@@ -245,14 +258,11 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
         <Text style={styles.emptyBody}>
           이야기 속 주인공이 될 아이의 이름과 좋아하는 것들을 알려주세요.
         </Text>
-        <Pressable
-          style={styles.primaryButton}
-          onPress={() => navigation.navigate("ProfileForm")}
-          accessibilityRole="button"
+        <PremiumCreateButton
+          label="프로필 만들기"
+          onPress={() => navigation.dispatch(CommonActions.navigate("MyPageTab", { screen: "ProfileForm" }))}
           accessibilityLabel="아이 프로필 만들기"
-        >
-          <Text style={styles.primaryButtonText}>프로필 만들기</Text>
-        </Pressable>
+        />
       </View>
     );
   }
@@ -290,18 +300,28 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
           1~2문장이면 충분해요. 당신이 아이를 가장 잘 아니까요.
         </Text>
 
-        <TextInput
+        <StyledInput
           style={[styles.input, overLimit && styles.inputError]}
           value={text}
           onChangeText={setText}
           placeholder={guide.placeholder}
-          placeholderTextColor={theme.colors.textSecondary}
           multiline
           textAlignVertical="top"
           maxLength={PARENT_TEXT_MAX_LENGTH + 50}
           accessibilityLabel="이야기 내용 입력"
           accessibilityHint={`최대 ${PARENT_TEXT_MAX_LENGTH}자까지 적을 수 있어요`}
         />
+
+        {/* 문자 카운트 프로그레스 바 */}
+        <View style={styles.progressBarTrack}>
+          <View
+            style={[
+              styles.progressBarFill,
+              { width: `${progressPercent}%` },
+              overLimit && styles.progressBarOver,
+            ]}
+          />
+        </View>
 
         <View style={styles.counterRow}>
           <Text style={[styles.counter, counterTone]}>
@@ -314,34 +334,24 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
           )}
         </View>
 
-        <View style={styles.examplesBlock}>
+        <Card style={styles.examplesBlock}>
           <Text style={styles.examplesTitle}>이렇게 적어도 좋아요</Text>
           {guide.examples.map((example) => (
             <Text key={example} style={styles.exampleItem}>
               · {example}
             </Text>
           ))}
-        </View>
+        </Card>
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable
-          style={[styles.primaryButton, !canSubmit && styles.primaryDisabled]}
+        <PremiumCreateButton
+          label={submitting ? "이야기가 자라고 있어요 🌱" : "이야기 만들기"}
           onPress={handleSubmit}
           disabled={!canSubmit}
-          accessibilityRole="button"
+          loading={submitting}
           accessibilityLabel="이야기 만들기"
-          accessibilityState={{ disabled: !canSubmit, busy: submitting }}
-        >
-          {submitting ? (
-            <View style={styles.buttonRow}>
-              <ActivityIndicator color={theme.colors.white} />
-              <Text style={styles.primaryButtonText}>이야기가 자라고 있어요 🌱</Text>
-            </View>
-          ) : (
-            <Text style={styles.primaryButtonText}>이야기 만들기</Text>
-          )}
-        </Pressable>
+        />
       </View>
     </KeyboardAvoidingView>
   );
@@ -351,164 +361,132 @@ export const DescriptiveInputScreen: React.FC<Props> = ({
 // 스타일
 // ---------------------------------------------------------------------------
 
-const buttonShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  android: {
-    elevation: 4,
-  },
-});
-
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
   },
   centered: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 32,
-    gap: 12,
+    paddingHorizontal: spacing.xl,
+    gap: spacing.md,
   },
   emptyTitle: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 20,
-    color: theme.colors.text,
+    fontSize: typography.size.lg,
+    color: colors.neutral[800],
     textAlign: "center",
   },
   emptyBody: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 14,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
     textAlign: "center",
-    marginBottom: 16,
+    marginBottom: spacing.base,
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.lg,
   },
   childChip: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 13,
-    color: theme.colors.primary,
-    backgroundColor: theme.colors.primaryLight,
+    fontSize: typography.size.xs,
+    color: colors.primary[500],
+    backgroundColor: colors.primary[50],
     alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    marginBottom: 16,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.full,
+    marginBottom: spacing.base,
     overflow: "hidden",
   },
   title: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 24,
-    color: theme.colors.text,
-    marginBottom: 8,
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
+    marginBottom: spacing.sm,
   },
   subtitle: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    marginBottom: 20,
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
+    marginBottom: spacing.lg - 4,
     lineHeight: 20,
   },
   input: {
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
     minHeight: 140,
-    fontFamily: "Pretendard-Medium",
-    fontSize: 16,
-    color: theme.colors.text,
     lineHeight: 24,
+    borderRadius: radius.md,
+    textAlignVertical: "top",
   },
   inputError: {
-    borderColor: "#D9534F",
+    borderColor: colors.semantic.error,
+  },
+  progressBarTrack: {
+    height: 4,
+    borderRadius: radius.full,
+    backgroundColor: colors.neutral[200],
+    overflow: "hidden",
+    marginTop: spacing.sm,
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: colors.primary[400],
+    borderRadius: radius.full,
+  },
+  progressBarOver: {
+    backgroundColor: colors.semantic.error,
   },
   counterRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 8,
+    marginTop: spacing.sm,
     minHeight: 18,
   },
   counter: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 12,
+    fontSize: typography.size.xs,
   },
   counterMuted: {
-    color: theme.colors.textSecondary,
+    color: colors.neutral[300],
   },
   counterActive: {
-    color: theme.colors.text,
+    color: colors.neutral[800],
   },
   counterOver: {
-    color: "#D9534F",
+    color: colors.semantic.error,
   },
   counterWarning: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 12,
-    color: "#D9534F",
+    fontSize: typography.size.xs,
+    color: colors.semantic.error,
   },
   examplesBlock: {
-    marginTop: 24,
-    padding: 16,
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    marginTop: spacing.lg,
   },
   examplesTitle: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 14,
-    color: theme.colors.text,
-    marginBottom: 8,
+    fontSize: typography.size.sm,
+    color: colors.neutral[800],
+    marginBottom: spacing.sm,
   },
   exampleItem: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 13,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.xs,
+    color: colors.neutral[300],
     lineHeight: 20,
   },
   footer: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 24,
-    backgroundColor: theme.colors.background,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    backgroundColor: colors.neutral[50],
     borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    ...buttonShadow,
-  },
-  primaryDisabled: {
-    opacity: 0.5,
-  },
-  primaryButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
-  },
-  buttonRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    borderTopColor: colors.neutral[100],
   },
 });

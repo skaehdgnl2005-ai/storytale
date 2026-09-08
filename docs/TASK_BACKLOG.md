@@ -195,7 +195,22 @@
 - **의존성**: R3, R4
 - **검증**: 스크립트 실행 → 25권 적재 성공
 
-**🔍 품질 게이트 G3.5**: 10개 시나리오로 추천 품질 수동 검증 (TODO).
+**🔍 품질 게이트 G3.5**: 10개 시나리오로 추천 품질 수동 검증 — **PASS (9/10)**. 상세: `docs/quality-gates/G3_5_BOOK_RECOMMENDATION.md`.
+
+### R-UI — 추천 프론트엔드 UI [완료]
+- **산출물**:
+  - `packages/mobile/src/api/recommendations.ts` — `createRecommendation()` API 클라이언트
+  - `packages/mobile/src/screens/RecommendPurposeScreen.tsx` — 추천 목적 선택 (PURPOSE_CARDS 재활용)
+  - `packages/mobile/src/screens/RecommendInputScreen.tsx` — 서술 입력 → 추천 API 호출
+  - `packages/mobile/src/screens/RecommendResultScreen.tsx` — 키워드 뱃지 + 도서 카드 + 독후 가이드 + 맞춤 동화 CTA
+  - `packages/mobile/src/screens/HomeScreen.tsx` — 개편: "이야기의 힘을 빌려보세요" 메인 CTA + 프로필 필수화
+  - `packages/mobile/src/navigation/AppNavigator.tsx` — RecommendPurpose/RecommendInput/RecommendResult 라우트 추가
+- **의존성**: R7 (추천 API), S27 (인증), S28 (프로필 API), S30a (plan 엔드포인트 — shortcut용)
+- **검증**: `npx tsc --noEmit` 통과
+- **설계 결정**:
+  - Home 화면 프로필 필수화: 프로필 없으면 프로필 등록만 표시, 있으면 추천 메인 CTA 노출
+  - 맞춤 동화 shortcut: RecommendResult → intentAnalysis 기반 createStoryPlan → Preview 직행 (PurposeSelect/DescriptiveInput 건너뜀)
+  - 추천이 초기 유입의 핵심이므로 Home CTA 최상단 배치
 
 ---
 
@@ -268,10 +283,10 @@
 - **의존성**: S4, S5
 - **미완 사항(2026-04-11 S35b 수동 스모크 중 발견, S27b 에서 해소)**: ~~모바일 측 로그인 UI 전무~~ → S27b 세션 1(백엔드 이메일/비번) + 세션 2(모바일 LoginScreen + 토큰 영속화 + 401 통일 정책) 로 완전 해소. 5개 화면의 `TODO(post-S27)` 주석 전부 제거됨.
 
-### S27b — 이메일+비밀번호 로그인 (모바일 통합) [완료 (실기기 스모크 대기)]
+### S27b — 이메일+비밀번호 로그인 (모바일 통합) [완료]
 - **2026-04-11 세션 1 완료**: 백엔드 전체 — `POST /auth/register/email` + `POST /auth/login/email` + `User.password_hash` + bcrypt + constant-time login + 15/15 테스트. 상세는 SESSION_LOG S27b 세션 1.
 - **2026-04-11 세션 2 완료**: 모바일 전체 — `LoginScreen.tsx` + `tokenStore.ts` (AsyncStorage wrapper) + `bootstrap.ts` (`bootstrapAuth` + `forceLogoutToLogin`) + `AppNavigator` 에 Login 라우트 + `App.tsx` 부트스트랩 배선 + 5개 화면의 `TODO(post-S27)` 주석 제거. 총 8개 401 지점 `forceLogoutToLogin` 으로 통일. `packages/backend/scripts/dev_token.py` 삭제 완료. `npx tsc --noEmit` (mobile + shared) 통과. 상세는 SESSION_LOG S27b 세션 2.
-- **실기기 수동 스모크**: 사용자 수행 대기 — LoginScreen → 회원가입 → 9화면 탭 체크리스트 → 앱 재시작 후 자동 Home. 결과는 SESSION_LOG S35b 엔트리에 추가 기록 예정.
+- **2026-04-13 실기기 스모크 통과**: LoginScreen 첫 화면 / signup → Home / 프로필 등록 / 내 서재 / 앱 재시작 후 자동 로그인 전부 정상. 이야기 만들기만 핫스팟 네트워크 타임아웃으로 skip (S35b 에서 이미 검증).
 - **비범위 (S27c 로 분리)**: 카카오/구글/애플 OAuth SDK 연동. 앱스토어 심사 "3rd-party sign-in 옵션" 요구사항 맞추려는 목적이므로 **출시 직전** 에 별도 태스크. 개발 중엔 불필요.
 
 ### S27b (원본 계획) — 이메일+비밀번호 로그인 모바일 통합 [아카이브]
@@ -345,7 +360,11 @@
 - **검증**: `npx tsc --noEmit` 통과 + 백엔드 회귀 `test_s30a_plan_endpoint.py` + `test_s31a_plan_revise_endpoint.py` + `test_s19_story_api.py` 39/39 통과 + `ruff check` 통과
 - **S33 임시 처리**: 완료 시 "그림책 열어보기" CTA 는 현재 Alert + Home 복귀. S33(그림책 뷰어) 에서 `navigation.navigate("Viewer", { storyId })` 로 교체 예정(`// TODO(S33)` 주석 명시). 단, `story_id` 를 state 로 승격해야 하는 후속 수정 필요(SESSION_LOG 기록).
 
-**🔍 품질 게이트 G4.5**: S31 완료 후 핵심 사용자 플로우(프로필→서술입력→미리보기) 수동 검증.
+**🔍 품질 게이트 G4.5**: 핵심 사용자 플로우 수동 검증. 두 경로 모두 실기기에서 확인:
+- **경로 A (맞춤 동화)**: Home → PurposeSelect → DescriptiveInput → Preview → Generation → Viewer → Library
+- **경로 B (추천 → 전환)**: Home → RecommendPurpose → RecommendInput → RecommendResult → "맞춤 동화 만들기" shortcut → Preview → Generation → Viewer
+- **프로필 필수화**: 프로필 미등록 상태에서 Home 진입 시 프로필 등록만 노출되는지 확인
+- **프로필 등록 후 복귀**: ProfileForm 완료 → Home 복귀 시 추천 CTA가 정상 노출되는지 확인
 
 ### S33 — 그림책 뷰어 [완료]
 - **산출물**: `ViewerScreen` (가로 FlatList + pagingEnabled 스와이프, 일러스트 4:3 + 텍스트 카드 레이아웃, 페이지 인디케이터, 로딩/에러/성공 상태 분기), `getStory()` API 클라이언트 + `StoryDetailResponse`/`StoryPageDetail` 와이어 타입, `Viewer` 라우트 등록, GenerationScreen `storyId` state 승격 + `handleOpenBook` Alert → `navigation.reset([Home, Viewer])` 교체 (S32 후속 이슈 해소)

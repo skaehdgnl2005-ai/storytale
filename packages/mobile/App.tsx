@@ -3,6 +3,7 @@ import { View } from "react-native";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { AppNavigator } from "./src/navigation/AppNavigator";
+import { PaperBackground } from "./src/components/PaperBackground";
 import { bootstrapAuth, type BootstrapRoute } from "./src/auth/bootstrap";
 
 SplashScreen.preventAutoHideAsync();
@@ -45,8 +46,10 @@ export default function App() {
   }
 
   return (
-    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
-      <AppNavigator initialRouteName={initialRoute} />
-    </View>
+    <PaperBackground>
+      <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+        <AppNavigator initialRouteName={initialRoute} />
+      </View>
+    </PaperBackground>
   );
 }

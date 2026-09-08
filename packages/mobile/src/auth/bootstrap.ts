@@ -9,12 +9,11 @@
  * 보내 사용자가 재시도할 기회를 제공한다.
  */
 
-import type { NavigationProp } from "@react-navigation/native";
+import { CommonActions } from "@react-navigation/native";
 import { ApiClientError, getCurrentUser, setAccessToken } from "../api/client";
-import type { RootStackParamList } from "../navigation/AppNavigator";
 import { clearTokens, loadTokens } from "../storage/tokenStore";
 
-export type BootstrapRoute = "Home" | "Login";
+export type BootstrapRoute = "MainTabs" | "Login";
 
 /**
  * 앱 진입 시 초기 라우트를 결정한다.
@@ -34,7 +33,7 @@ export async function bootstrapAuth(): Promise<BootstrapRoute> {
 
   try {
     await getCurrentUser();
-    return "Home";
+    return "MainTabs";
   } catch (err) {
     // 401 은 "서버가 명시적으로 토큰을 거부" — 저장소를 비운다.
     // 나머지는 일시적 오류 가능성이 있으므로 토큰은 남겨두되 메모리는 비운다.
@@ -59,9 +58,11 @@ export async function bootstrapAuth(): Promise<BootstrapRoute> {
  * 여기서도 서버 무효화를 병행하도록 재검토.
  */
 export async function forceLogoutToLogin(
-  navigation: NavigationProp<RootStackParamList>,
+  navigation: { dispatch: (action: ReturnType<typeof CommonActions.reset>) => void },
 ): Promise<void> {
   setAccessToken(null);
   await clearTokens();
-  navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+  navigation.dispatch(
+    CommonActions.reset({ index: 0, routes: [{ name: "Login" }] }),
+  );
 }

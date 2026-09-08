@@ -1,11 +1,9 @@
 /**
- * 이메일+비밀번호 로그인 / 회원가입 화면 (S27b).
+ * 이메일+비밀번호 로그인 / 회원가입 화면 (S27b — v3.1 디자인).
  *
  * 세션 1(백엔드) 계약:
  *  POST /auth/register/email  → 200 AuthTokens / 409 EMAIL_ALREADY_EXISTS / 422
  *  POST /auth/login/email     → 200 AuthTokens / 401 (3케이스 통일) / 422
- *
- * 디자인: docs/visual-identity-guide-rn.md Section 12 (ProfileFormScreen 과 동일 팔레트).
  *
  * 본 화면은 "개발용 최소 로그인" 이다 — 소셜 OAuth 는 S27c 로 분리.
  * 과투자 금지: 비번 찾기/이메일 재발송/약관 동의 플로우는 S27c 또는 S38 이후로 미룸.
@@ -15,17 +13,14 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  TextInput,
-  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
 } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+import { colors, shadows, radius, typography, spacing } from "../theme";
 import {
   ApiClientError,
   loginWithEmail,
@@ -33,6 +28,9 @@ import {
   setAccessToken,
 } from "../api/client";
 import { saveTokens } from "../storage/tokenStore";
+import { StyledInput } from "../components/StyledInput";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
+import { SecondaryButton } from "../components/SecondaryButton";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Login">;
 
@@ -81,7 +79,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
       });
 
       // Login 스택 완전 제거. Home 으로 진입 후 back 해도 LoginScreen 재진입 못함.
-      navigation.reset({ index: 0, routes: [{ name: "Home" }] });
+      navigation.reset({ index: 0, routes: [{ name: "MainTabs" }] });
     } catch (err) {
       handleError(err);
     } finally {
@@ -131,6 +129,12 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
+        {/* StoryTale 텍스트 로고 */}
+        <Text style={styles.logo}>StoryTale</Text>
+
+        {/* 마스코트 앵커 영역 */}
+        <View style={styles.mascotAnchor} />
+
         <Text style={styles.title}>
           {mode === "signup" ? "첫 이야기를 시작해볼까요" : "다시 만나서 반가워요"}
         </Text>
@@ -147,12 +151,10 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
         ) : null}
 
         <Text style={styles.label}>이메일</Text>
-        <TextInput
-          style={styles.input}
+        <StyledInput
           value={email}
           onChangeText={setEmail}
           placeholder="예: parent@example.com"
-          placeholderTextColor={theme.colors.placeholder}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
@@ -163,12 +165,10 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
         />
 
         <Text style={styles.label}>비밀번호</Text>
-        <TextInput
-          style={styles.input}
+        <StyledInput
           value={password}
           onChangeText={setPassword}
           placeholder="8자 이상"
-          placeholderTextColor={theme.colors.placeholder}
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
@@ -177,29 +177,24 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
           accessibilityLabel="비밀번호 입력"
         />
 
-        <Pressable
-          style={[styles.submitButton, !isValid && styles.submitDisabled]}
-          onPress={handleSubmit}
-          disabled={!isValid || loading}
-          accessibilityLabel={submitLabel}
-          accessibilityRole="button"
-        >
-          {loading ? (
-            <ActivityIndicator color={theme.colors.white} />
-          ) : (
-            <Text style={styles.submitText}>{submitLabel}</Text>
-          )}
-        </Pressable>
+        <View style={styles.submitWrap}>
+          <PremiumCreateButton
+            label={submitLabel}
+            onPress={handleSubmit}
+            disabled={!isValid}
+            loading={loading}
+            accessibilityLabel={submitLabel}
+          />
+        </View>
 
-        <Pressable
-          style={styles.toggleButton}
+        <SecondaryButton
+          label={toggleLabel}
           onPress={toggleMode}
           disabled={loading}
+          variant="text"
           accessibilityLabel={toggleLabel}
-          accessibilityRole="button"
-        >
-          <Text style={styles.toggleText}>{toggleLabel}</Text>
-        </Pressable>
+          style={styles.toggleButton}
+        />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -211,107 +206,62 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 48,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing["2xl"],
+  },
+  logo: {
+    fontFamily: "Pretendard-Bold",
+    fontSize: typography.size["2xl"],
+    color: colors.neutral[800],
+    textAlign: "center",
+    marginBottom: spacing.base,
+  },
+  mascotAnchor: {
+    height: 120,
+    marginBottom: spacing.lg,
   },
   title: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 24,
-    color: theme.colors.text,
-    marginBottom: 8,
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
+    marginBottom: spacing.sm,
   },
   subtitle: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
-    marginBottom: 32,
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
+    marginBottom: spacing.xl,
   },
   errorBanner: {
     backgroundColor: "#FDECEC",
-    borderColor: theme.colors.error,
+    borderColor: colors.semantic.error,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 16,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.base,
   },
   errorText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 14,
-    color: theme.colors.error,
+    fontSize: typography.size.sm,
+    color: colors.semantic.error,
   },
   label: {
     fontFamily: "Pretendard-SemiBold",
-    fontSize: 14,
-    color: theme.colors.text,
-    marginBottom: 8,
-    marginTop: 16,
+    fontSize: typography.size.sm,
+    color: colors.neutral[800],
+    marginBottom: spacing.sm,
+    marginTop: spacing.base,
   },
-  input: {
-    fontFamily: "Pretendard-Medium",
-    fontSize: 16,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.white,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#3E3225",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
-  },
-  submitButton: {
-    marginTop: 32,
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: "center",
-    minHeight: 52,
-    justifyContent: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#3E3225",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  submitDisabled: {
-    opacity: 0.5,
-  },
-  submitText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
+  submitWrap: {
+    marginTop: spacing.xl,
   },
   toggleButton: {
-    marginTop: 16,
-    paddingVertical: 12,
-    alignItems: "center",
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  toggleText: {
-    fontFamily: "Pretendard-SemiBold",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
-    textDecorationLine: "underline",
+    alignSelf: "center",
+    marginTop: spacing.base,
   },
 });

@@ -1,5 +1,5 @@
 /**
- * 내 서재 (S34).
+ * 내 서재 (S34 — v3.1 디자인).
  *
  * 흐름: Home → Library → (카드 탭) Viewer → (back) Library → (back) Home
  *
@@ -9,18 +9,10 @@
  * - 카드 long-press → 삭제 확인 Alert → `deleteStory(id)` + 로컬 state 제거.
  *
  * 상태 분기 (4종):
- *   1) loading — 첫 로드 중. ActivityIndicator + "이야기를 펼치고 있어요 📖".
+ *   1) loading — 첫 로드 중. ActivityIndicator.
  *   2) error — 401/그 외. CTA "다시 시도" 로 재호출.
- *   3) empty — items.length === 0. "첫 번째 이야기를 만들어볼까요?" 카드 + 만들기 CTA.
- *   4) list — 카드 그리드. created_at 내림차순(서버 정렬).
- *
- * S33 의 `ViewerReady` 분리 패턴을 의도적으로 따르지 않았다 — 본 화면은 list 상태에서
- * 추가 훅이 필요하지 않아 단일 컴포넌트로 충분하며, 4상태 모두 early return 으로 처리.
- *
- * 디자인: docs/visual-identity-guide-rn.md Section 12
- *   - warm pastel, borderRadius 14/20, Pretendard, shadowColor "#3E3225"
- *   - 최소 터치 타겟 52px, accessibilityLabel 필수
- *   - 톤: "이야기가 자라고 있어요 🌱" 등 CLAUDE.md 카피 패턴
+ *   3) empty — items.length === 0. 마스코트 + 만들기 CTA.
+ *   4) list — Card 컴포넌트 그리드. created_at 내림차순(서버 정렬).
  */
 
 import React, { useCallback, useEffect, useState } from "react";
@@ -28,17 +20,16 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Platform,
-  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
   type ListRenderItemInfo,
 } from "react-native";
+import { CommonActions } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import type { RootStackParamList } from "../navigation/AppNavigator";
-import { theme } from "../theme";
+import type { LibraryTabParamList } from "../navigation/AppNavigator";
+import { colors, shadows, radius, typography, spacing } from "../theme";
 import { ApiClientError } from "../api/client";
 import { forceLogoutToLogin } from "../auth/bootstrap";
 import {
@@ -46,8 +37,10 @@ import {
   listStories,
   type StoryListItem,
 } from "../api/stories";
+import { Card } from "../components/Card";
+import { PremiumCreateButton } from "../components/PremiumCreateButton";
 
-type Props = NativeStackScreenProps<RootStackParamList, "Library">;
+type Props = NativeStackScreenProps<LibraryTabParamList, "Library">;
 
 // ---------------------------------------------------------------------------
 // 헬퍼
@@ -85,6 +78,26 @@ function statusLabel(status: string): string {
     default:
       return status;
   }
+}
+
+/**
+ * story id 해시로 커버 컬러 결정 — emoji 대신 색상 배경 사용.
+ */
+const COVER_COLORS = [
+  colors.primary[300],
+  colors.primary[400],
+  colors.secondary[300],
+  colors.secondary[400],
+  colors.primary[100],
+  colors.secondary[50],
+] as const;
+
+function coverColorForId(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  }
+  return COVER_COLORS[Math.abs(hash) % COVER_COLORS.length];
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +156,7 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleOpenStory = useCallback(
     (storyId: string): void => {
-      navigation.navigate("Viewer", { storyId });
+      navigation.dispatch(CommonActions.navigate("Viewer", { storyId }));
     },
     [navigation],
   );
@@ -194,7 +207,7 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   const handleStartCreate = useCallback((): void => {
-    navigation.navigate("PurposeSelect");
+    navigation.dispatch(CommonActions.navigate("HomeTab", { screen: "PurposeSelect" }));
   }, [navigation]);
 
   // -------------------------------------------------------------------------
@@ -205,27 +218,30 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     ({ item }: ListRenderItemInfo<StoryListItem>) => {
       const subtitle = `${formatCreatedAt(item.created_at)} · ${item.page_count}페이지 · ${statusLabel(item.status)}`;
       return (
-        <Pressable
-          style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+        <Card
           onPress={() => handleOpenStory(item.id)}
           onLongPress={() => handleDeleteStory(item)}
-          delayLongPress={400}
-          accessibilityRole="button"
           accessibilityLabel={`${item.title} 열기`}
           accessibilityHint="길게 누르면 지울 수 있어요"
+          style={styles.card}
         >
-          <View style={styles.cardCover}>
-            <Text style={styles.cardCoverEmoji}>📖</Text>
+          <View style={styles.cardRow}>
+            <View
+              style={[
+                styles.cardCover,
+                { backgroundColor: coverColorForId(item.id) },
+              ]}
+            />
+            <View style={styles.cardBody}>
+              <Text style={styles.cardTitle} numberOfLines={2}>
+                {item.title || "제목 없는 이야기"}
+              </Text>
+              <Text style={styles.cardSubtitle} numberOfLines={1}>
+                {subtitle}
+              </Text>
+            </View>
           </View>
-          <View style={styles.cardBody}>
-            <Text style={styles.cardTitle} numberOfLines={2}>
-              {item.title || "제목 없는 이야기"}
-            </Text>
-            <Text style={styles.cardSubtitle} numberOfLines={1}>
-              {subtitle}
-            </Text>
-          </View>
-        </Pressable>
+        </Card>
       );
     },
     [handleOpenStory, handleDeleteStory],
@@ -238,7 +254,7 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={theme.colors.primary} size="large" />
+        <ActivityIndicator color={colors.primary[400]} size="large" />
         <Text style={styles.loadingText}>이야기를 펼치고 있어요 📖</Text>
       </View>
     );
@@ -248,38 +264,37 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>{errorMessage}</Text>
-        <Pressable
-          style={styles.primaryButton}
+        <PremiumCreateButton
+          label="다시 시도"
           onPress={async () => {
             setLoading(true);
             await load();
             setLoading(false);
           }}
-          accessibilityRole="button"
           accessibilityLabel="다시 시도"
-        >
-          <Text style={styles.primaryButtonText}>다시 시도</Text>
-        </Pressable>
+        />
       </View>
     );
   }
 
   if (items.length === 0) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.emptyEmoji}>🌱</Text>
-        <Text style={styles.emptyTitle}>첫 번째 이야기를 만들어볼까요?</Text>
-        <Text style={styles.emptyHint}>
-          만든 이야기들이 여기 모일 거예요.
-        </Text>
-        <Pressable
-          style={styles.primaryButton}
-          onPress={handleStartCreate}
-          accessibilityRole="button"
-          accessibilityLabel="이야기 만들기 시작"
-        >
-          <Text style={styles.primaryButtonText}>이야기 만들기</Text>
-        </Pressable>
+      <View style={styles.emptyContainer}>
+        {/* 마스코트 앵커 영역 */}
+        <View style={styles.mascotAnchor} />
+
+        {/* 콘텐츠 카드 */}
+        <View style={styles.contentCard}>
+          <Text style={styles.emptyTitle}>첫 번째 이야기를 만들어볼까요?</Text>
+          <Text style={styles.emptyHint}>
+            만든 이야기들이 여기 모일 거예요.
+          </Text>
+          <PremiumCreateButton
+            label="이야기 만들기"
+            onPress={handleStartCreate}
+            accessibilityLabel="이야기 만들기 시작"
+          />
+        </View>
       </View>
     );
   }
@@ -295,7 +310,7 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
         <RefreshControl
           refreshing={refreshing}
           onRefresh={handleRefresh}
-          tintColor={theme.colors.primary}
+          tintColor={colors.primary[400]}
         />
       }
       ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -307,133 +322,101 @@ export const LibraryScreen: React.FC<Props> = ({ navigation }) => {
 // 스타일
 // ---------------------------------------------------------------------------
 
-const buttonShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-  },
-  android: {
-    elevation: 4,
-  },
-});
-
-const cardShadow = Platform.select({
-  ios: {
-    shadowColor: "#3E3225",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-  },
-  android: {
-    elevation: 2,
-  },
-});
-
 const styles = StyleSheet.create({
   centered: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24,
-    gap: 12,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
   },
   loadingText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
     textAlign: "center",
   },
   errorText: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 15,
-    color: theme.colors.text,
+    fontSize: typography.size.sm,
+    color: colors.neutral[800],
     textAlign: "center",
     lineHeight: 22,
   },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 4,
+
+  // ── 빈 상태 ─────────────────────────────────────────
+  emptyContainer: {
+    flex: 1,
+    backgroundColor: colors.neutral[50],
+  },
+  mascotAnchor: {
+    height: 160,
+    backgroundColor: colors.primary[50],
+  },
+  contentCard: {
+    flex: 1,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    alignItems: "center",
+    ...shadows.softBase,
   },
   emptyTitle: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 20,
-    color: theme.colors.text,
+    fontSize: typography.size.xl,
+    color: colors.neutral[800],
     textAlign: "center",
+    marginBottom: spacing.sm,
   },
   emptyHint: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 14,
-    color: theme.colors.textSecondary,
+    fontSize: typography.size.sm,
+    color: colors.neutral[300],
     textAlign: "center",
-    marginBottom: 12,
+    marginBottom: spacing.lg,
   },
+
+  // ── 리스트 ──────────────────────────────────────────
   list: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor: colors.neutral[50],
   },
   listContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.base,
   },
   separator: {
-    height: 12,
+    height: spacing.md,
   },
   card: {
-    flexDirection: "row",
-    backgroundColor: theme.colors.white,
-    borderRadius: 20,
-    padding: 14,
-    minHeight: 96,
-    alignItems: "center",
-    gap: 14,
-    ...cardShadow,
+    padding: spacing.md,
   },
-  cardPressed: {
-    opacity: 0.85,
+  cardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
   },
   cardCover: {
     width: 68,
     height: 68,
-    borderRadius: 16,
-    backgroundColor: theme.colors.primaryLight,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardCoverEmoji: {
-    fontSize: 32,
+    borderRadius: radius.md,
   },
   cardBody: {
     flex: 1,
-    gap: 6,
+    gap: spacing.xs + 2,
   },
   cardTitle: {
     fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.text,
+    fontSize: typography.size.base,
+    color: colors.neutral[800],
     lineHeight: 23,
   },
   cardSubtitle: {
     fontFamily: "Pretendard-Medium",
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-  },
-  primaryButton: {
-    marginTop: 8,
-    backgroundColor: theme.colors.primary,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    ...buttonShadow,
-  },
-  primaryButtonText: {
-    fontFamily: "Pretendard-Bold",
-    fontSize: 17,
-    color: theme.colors.white,
+    fontSize: typography.size.xs,
+    color: colors.neutral[300],
   },
 });
